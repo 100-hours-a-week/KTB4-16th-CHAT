@@ -3,7 +3,7 @@
   "info": {
     "title": "MULO API",
     "version": "2.7",
-    "description": "MULO 통합 API 계약 기준 OpenAPI 문서입니다.\n\n- 현재 feature 구현과 기존 OpenAPI v2.6 계약을 함께 보존합니다.\n- 각 작업의 x-implementation-status는 implemented, contract-only, excluded-v1 중 하나입니다.\n- 홈 인기 자물쇠는 조회 시점 기준 최근 7일 데이터를 사용합니다.\n- 내 자물쇠 조회와 사용자 자물쇠 지역 그룹에는 7일 제한을 적용하지 않습니다.\n- 신규 Place는 서버 Kakao 역지오코딩에서 유효한 법정동(B) code/name을 확인한 경우에만 생성하며, 기존 데이터의 미확인 법정동 조회 fallback은 유지합니다.\n- 커서 기반 목록 API size는 기본 20, 최소 1, 최대 100이며 채팅 메시지 내역만 기본 30입니다.\n- Refresh/CSRF Cookie의 SameSite 최종 정책은 배포 구조에 따라 확정하며 현재 구현은 Strict입니다.\n- 서버 URL은 아직 확정되지 않아 지정하지 않았습니다."
+    "description": "MULO 통합 API 계약 기준 OpenAPI 문서입니다.\n\n- 현재 feature 구현과 기존 OpenAPI v2.6 계약을 함께 보존합니다.\n- 각 작업의 x-implementation-status는 implemented, contract-only, excluded-v1 중 하나입니다.\n- 홈 인기 자물쇠는 조회 시점 기준 최근 7일 데이터를 사용합니다.\n- 내 자물쇠 조회와 사용자 자물쇠 지역 그룹에는 7일 제한을 적용하지 않습니다.\n- 신규 Place는 서버 Kakao 역지오코딩에서 유효한 법정동(B) code/name을 확인한 경우에만 생성하며, 기존 데이터의 미확인 법정동 조회 fallback은 유지합니다.\n- 커서 기반 목록 API size는 각 API 계약을 따르며 Chat Server 메시지 내역은 20개입니다.\n- CHAT 사용자·내부 API는 Chat Server 소유입니다. POST /internal/auth/verify는 Backend 소유 외부 인증 연동 계약이며 Chat Server에서 구현하지 않습니다.\n- Chat Server의 STOMP destination 및 payload는 specs/MULO_Chat_STOMP_v2.0.md에 별도 정의합니다.\n- Refresh/CSRF Cookie의 SameSite 최종 정책은 배포 구조에 따라 확정하며 현재 구현은 Strict입니다.\n- 서버 URL은 아직 확정되지 않아 지정하지 않았습니다."
   },
   "tags": [
     {
@@ -48,6 +48,14 @@
     },
     {
       "name": "CHAT / 채팅"
+    },
+    {
+      "name": "CHAT INTERNAL / Chat Server 내부 연동",
+      "description": "Backend와 Chat Server 사이의 내부 API 계약"
+    },
+    {
+      "name": "BACKEND AUTH INTEGRATION / Backend 인증 연동",
+      "description": "Backend 소유 API에 대한 Chat Server 외부 연동 계약. Backend 전체 API 명세 변경이 아님."
     },
     {
       "name": "NOTIFICATION / 알림"
@@ -629,7 +637,9 @@
         },
         "security": [
           {
-            "bearerAuth": []
+            "bearerAuth": [
+
+            ]
           }
         ],
         "x-implementation-status": "implemented"
@@ -1553,7 +1563,9 @@
         ],
         "security": [
           {
-            "bearerAuth": []
+            "bearerAuth": [
+
+            ]
           }
         ],
         "x-implementation-status": "implemented"
@@ -1583,6 +1595,12 @@
                       "items": {
                         "type": "object",
                         "properties": {
+                          "provider": {
+                            "type": "string",
+                            "enum": [
+                              "SPOTIFY"
+                            ]
+                          },
                           "externalTrackId": {
                             "type": "string"
                           },
@@ -1591,12 +1609,6 @@
                           },
                           "artistName": {
                             "type": "string"
-                          },
-                          "provider": {
-                            "type": "string",
-                            "enum": [
-                              "SPOTIFY"
-                            ]
                           },
                           "albumImageUrl": {
                             "type": "string"
@@ -1669,6 +1681,28 @@
               }
             }
           },
+          "500": {
+            "description": "MULO 백엔드 내부의 예상하지 못한 처리 실패이므로 500.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "code": "INTERNAL_SERVER_ERROR",
+                  "message": "서버 내부 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+                }
+              }
+            }
+          },
           "429": {
             "description": "사용자별 또는 Spotify 호출 제한으로 음악 검색을 잠시 처리할 수 없으므로 429. Retry-After 헤더의 초 단위만큼 기다린 뒤 다시 요청한다.",
             "headers": {
@@ -1696,28 +1730,6 @@
                 "example": {
                   "code": "MUSIC_SEARCH_RATE_LIMITED",
                   "message": "음악 검색 요청이 많습니다. 잠시 후 다시 시도해주세요."
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "MULO 백엔드 내부의 예상하지 못한 처리 실패이므로 500.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "example": {
-                  "code": "INTERNAL_SERVER_ERROR",
-                  "message": "서버 내부 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
                 }
               }
             }
@@ -1974,7 +1986,9 @@
         "operationId": "getApiUploadsSignedUrl",
         "security": [
           {
-            "bearerAuth": []
+            "bearerAuth": [
+
+            ]
           }
         ],
         "description": "현재 사용자가 소유하고 생성 후 1시간이 지나지 않은 임시 업로드에 대해 private GCS 객체의 읽기용 Signed URL을 발급한다. Signed URL은 발급 시점부터 10분 동안 유효하다. HEIC 업로드는 서버에서 변환된 JPEG 객체의 Signed URL을 반환한다.",
@@ -2099,7 +2113,9 @@
         "operationId": "postApiRecommendationsPhoto",
         "security": [
           {
-            "bearerAuth": []
+            "bearerAuth": [
+
+            ]
           }
         ],
         "description": "임시 업로드된 사진을 AI가 분석한다. 추천 성공 시 정확히 5곡을 반환하며, AI 응답이 5곡 미만 또는 초과이면 추천 실패로 처리한다. 현재 사용자가 소유하고 생성 후 1시간이 지나지 않은 유효한 uploadId만 사용할 수 있다.",
@@ -2716,7 +2732,9 @@
         ],
         "security": [
           {
-            "bearerAuth": []
+            "bearerAuth": [
+
+            ]
           }
         ],
         "responses": {
@@ -3081,7 +3099,9 @@
         ],
         "security": [
           {
-            "bearerAuth": []
+            "bearerAuth": [
+
+            ]
           }
         ],
         "x-implementation-status": "implemented"
@@ -3238,7 +3258,9 @@
         ],
         "security": [
           {
-            "bearerAuth": []
+            "bearerAuth": [
+
+            ]
           }
         ],
         "x-implementation-status": "implemented",
@@ -3438,7 +3460,9 @@
         },
         "security": [
           {
-            "bearerAuth": []
+            "bearerAuth": [
+
+            ]
           }
         ],
         "x-implementation-status": "implemented",
@@ -3967,40 +3991,6 @@
         "operationId": "postApiUsersMeFriendRequests",
         "description": "필수\nnickname: String\n\n닉네임으로 요청한다. 반대 방향 pending 요청이 이미 있으면 pending을 삭제하고 바로 friendship을 생성한다.",
         "responses": {
-          "200": {
-            "description": "반대 방향 요청이 이미 존재해 새 요청 자원 대신 최종 friendship 상태로 전환되므로 200.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "type": "object",
-                      "properties": {
-                        "friendshipId": {
-                          "type": "integer",
-                          "format": "int64"
-                        },
-                        "message": {
-                          "type": "string"
-                        }
-                      }
-                    }
-                  }
-                },
-                "example": {
-                  "message": "친구 요청 성공",
-                  "data": {
-                    "friendshipId": 11,
-                    "message": "서로의 친구 요청이 확인되어 친구가 되었습니다."
-                  }
-                }
-              }
-            }
-          },
           "201": {
             "description": "새 pending friend_request가 생성되므로 201.",
             "content": {
@@ -4030,6 +4020,40 @@
                   "data": {
                     "friendRequestId": 21,
                     "message": "친구 요청을 보냈습니다."
+                  }
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "반대 방향 요청이 이미 존재해 새 요청 자원 대신 최종 friendship 상태로 전환되므로 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "friendshipId": {
+                          "type": "integer",
+                          "format": "int64"
+                        },
+                        "message": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                },
+                "example": {
+                  "message": "친구 요청 성공",
+                  "data": {
+                    "friendshipId": 11,
+                    "message": "서로의 친구 요청이 확인되어 친구가 되었습니다."
                   }
                 }
               }
@@ -4456,28 +4480,6 @@
               }
             }
           },
-          "401": {
-            "description": "친구 삭제는 인증된 사용자만 수행할 수 있으므로 유효한 Access Token이 없거나 인증에 실패한 경우 401.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "example": {
-                  "code": "UNAUTHORIZED",
-                  "message": "로그인이 필요합니다."
-                }
-              }
-            }
-          },
           "404": {
             "description": "현재 사용자가 소유한 관계가 존재하지 않으므로 404.",
             "content": {
@@ -4496,6 +4498,28 @@
                 "example": {
                   "code": "FRIENDSHIP_NOT_FOUND",
                   "message": "친구 관계를 찾을 수 없습니다."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "친구 삭제는 인증된 사용자만 수행할 수 있으므로 유효한 Access Token이 없거나 인증에 실패한 경우 401.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "code": "UNAUTHORIZED",
+                  "message": "로그인이 필요합니다."
                 }
               }
             }
@@ -5071,30 +5095,6 @@
           }
         },
         "responses": {
-          "200": {
-            "description": "AI가 degraded 상태를 반환했고 응답 tracks가 정확히 5곡이어서 기존 현재 플레이리스트를 유지했으므로 200.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "message": {
-                      "type": "string"
-                    },
-                    "data": {
-                      "type": "object"
-                    }
-                  }
-                },
-                "example": {
-                  "message": "추천 결과가 없어 기존 플레이리스트 유지",
-                  "data": {
-                    "playlist": null
-                  }
-                }
-              }
-            }
-          },
           "201": {
             "description": "AI 응답의 정확히 5곡으로 새 추천 플레이리스트를 생성하므로 201.",
             "content": {
@@ -5132,10 +5132,10 @@
                                   "artistName": {
                                     "type": "string"
                                   },
-                                  "externalUrl": {
+                                  "albumImageUrl": {
                                     "type": "string"
                                   },
-                                  "albumImageUrl": {
+                                  "externalUrl": {
                                     "type": "string"
                                   }
                                 }
@@ -5157,39 +5157,63 @@
                           "musicTrackId": 3,
                           "title": "비 오는 날엔",
                           "artistName": "헤이즈",
-                          "externalUrl": "...",
-                          "albumImageUrl": "https://i.scdn.co/image/example"
+                          "albumImageUrl": "https://i.scdn.co/image/example",
+                          "externalUrl": "..."
                         },
                         {
                           "musicTrackId": 4,
                           "title": "추천곡 2",
                           "artistName": "아티스트 2",
-                          "externalUrl": "https://open.spotify.com/track/example-2",
-                          "albumImageUrl": "https://i.scdn.co/image/example-2"
+                          "albumImageUrl": "https://i.scdn.co/image/example-2",
+                          "externalUrl": "https://open.spotify.com/track/example-2"
                         },
                         {
                           "musicTrackId": 5,
                           "title": "추천곡 3",
                           "artistName": "아티스트 3",
-                          "externalUrl": "https://open.spotify.com/track/example-3",
-                          "albumImageUrl": "https://i.scdn.co/image/example-3"
+                          "albumImageUrl": "https://i.scdn.co/image/example-3",
+                          "externalUrl": "https://open.spotify.com/track/example-3"
                         },
                         {
                           "musicTrackId": 6,
                           "title": "추천곡 4",
                           "artistName": "아티스트 4",
-                          "externalUrl": "https://open.spotify.com/track/example-4",
-                          "albumImageUrl": "https://i.scdn.co/image/example-4"
+                          "albumImageUrl": "https://i.scdn.co/image/example-4",
+                          "externalUrl": "https://open.spotify.com/track/example-4"
                         },
                         {
                           "musicTrackId": 7,
                           "title": "추천곡 5",
                           "artistName": "아티스트 5",
-                          "externalUrl": "https://open.spotify.com/track/example-5",
-                          "albumImageUrl": "https://i.scdn.co/image/example-5"
+                          "albumImageUrl": "https://i.scdn.co/image/example-5",
+                          "externalUrl": "https://open.spotify.com/track/example-5"
                         }
                       ]
                     }
+                  }
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "AI가 degraded 상태를 반환했고 응답 tracks가 정확히 5곡이어서 기존 현재 플레이리스트를 유지했으므로 200.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    },
+                    "data": {
+                      "type": "object"
+                    }
+                  }
+                },
+                "example": {
+                  "message": "추천 결과가 없어 기존 플레이리스트 유지",
+                  "data": {
+                    "playlist": null
                   }
                 }
               }
@@ -5268,28 +5292,6 @@
               }
             }
           },
-          "500": {
-            "description": "MULO 백엔드 내부의 예상하지 못한 처리 실패이므로 500.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "example": {
-                  "code": "INTERNAL_SERVER_ERROR",
-                  "message": "서버 내부 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
-                }
-              }
-            }
-          },
           "502": {
             "description": "날씨·기온 확보 실패, AI 서비스 통신 실패 또는 AI가 정확히 5곡이 아닌 응답을 반환해 추천을 생성할 수 없으므로 502.",
             "content": {
@@ -5311,6 +5313,28 @@
                 }
               }
             }
+          },
+          "500": {
+            "description": "MULO 백엔드 내부의 예상하지 못한 처리 실패이므로 500.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "code": "INTERNAL_SERVER_ERROR",
+                  "message": "서버 내부 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+                }
+              }
+            }
           }
         },
         "x-implementation-status": "implemented",
@@ -5327,7 +5351,9 @@
         "description": "필수\nlatitude: Double\nlongitude: Double\nat: ISO-8601 DateTime\n\n정책 및 설명\n- 요청 at은 받은 offset과 무관하게 KST로 정규화한다. 서버 KST의 현재 시간대 시작보다 이른 요청은 과거로 보고 400 INVALID_WEATHER_REQUEST_TIME으로 처리한다.\n- 위·경도를 기상청 격자(nx, ny)로 변환한다.\n- 같은 KST 날짜·격자의 weather_grid_forecasts 캐시를 우선 조회한다.\n- 해당 날짜·격자의 캐시가 전혀 없을 때만 기상청 단기예보 getVilageFcst를 조회해 저장한다.\n- 응답은 forecastAt, temperature, weatherCondition만 제공한다.\n- weatherCondition은 CLEAR/CLOUDY/OVERCAST/RAIN/SNOW/RAIN_SNOW/SHOWER 중 하나다.\n- 요청 시각의 분이 00~29이면 현재 정각, 30~59이면 다음 정각을 forecast_at으로 사용한다.\n- 예: 15:10 요청은 15:00 예보를 사용하고, 15:50 요청은 16:00 예보를 사용한다.\n\n- 기상청 getVilageFcst를 1회 호출하면 목표 예보시각 이후 항목을 시간대별로 파싱해 weather_grid_forecasts에 일괄 저장한다.\n- 같은 날짜·격자의 최초 성공 예보 묶음은 당일 유지하며, 더 최신 발표본으로 갱신하거나 외부 API를 재호출하지 않는다.\n- 최초 호출은 목표 예보시각을 포함하는 가장 최근 후보 회차를 시도하고, 실패 또는 미포함이면 바로 이전 후보 회차를 한 번만 시도한다.\n- 당일 캐시는 있으나 요청 시간대 예보가 없으면 WEATHER_API_ERROR로 처리한다.\n\n### 미정 정책\n- 국내 기상청 격자 범위 밖 좌표: 상태=미정, `WTH-002: HTTP 상태와 Error Code 미정` — 격자 범위 밖 좌표의 구체 상태와 오류 코드는 임의 확정하지 않는다.",
         "security": [
           {
-            "bearerAuth": []
+            "bearerAuth": [
+
+            ]
           }
         ],
         "responses": {
@@ -5546,28 +5572,6 @@
               }
             }
           },
-          "403": {
-            "description": "users.music_genre가 NULL이면 취향 투표를 사용할 수 없으므로 403.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "example": {
-                  "code": "MUSIC_GENRE_REQUIRED",
-                  "message": "대표 음악 장르 설정이 필요합니다."
-                }
-              }
-            }
-          },
           "404": {
             "description": "현재 사용자의 대표 음악 장르에 해당하는 오늘 날짜의 활성 질문이 존재하지 않으므로 404.",
             "content": {
@@ -5608,6 +5612,28 @@
                 "example": {
                   "code": "INTERNAL_SERVER_ERROR",
                   "message": "서버 내부 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "users.music_genre가 NULL이면 취향 투표를 사용할 수 없으므로 403.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "code": "MUSIC_GENRE_REQUIRED",
+                  "message": "대표 음악 장르 설정이 필요합니다."
                 }
               }
             }
@@ -5739,28 +5765,6 @@
               }
             }
           },
-          "403": {
-            "description": "users.music_genre가 NULL이면 투표 답변을 제출할 수 없으므로 403.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "code": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "example": {
-                  "code": "MUSIC_GENRE_REQUIRED",
-                  "message": "대표 음악 장르 설정이 필요합니다."
-                }
-              }
-            }
-          },
           "404": {
             "description": "투표할 질문이 없음\nvoteQuestionId에 해당하는 투표 질문이 존재하지 않으므로 404.",
             "content": {
@@ -5826,6 +5830,28 @@
                 }
               }
             }
+          },
+          "403": {
+            "description": "users.music_genre가 NULL이면 투표 답변을 제출할 수 없으므로 403.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "code": "MUSIC_GENRE_REQUIRED",
+                  "message": "대표 음악 장르 설정이 필요합니다."
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -5849,7 +5875,8 @@
                   "selectedOption": {
                     "type": "string"
                   },
-                  "voteQuestionId": {}
+                  "voteQuestionId": {
+                  }
                 },
                 "required": [
                   "selectedOption",
@@ -5864,7 +5891,9 @@
         },
         "security": [
           {
-            "bearerAuth": []
+            "bearerAuth": [
+
+            ]
           }
         ],
         "x-implementation-status": "contract-only",
@@ -5878,7 +5907,8 @@
         ],
         "summary": "매칭 요청 생성",
         "operationId": "postApiMatchRequests",
-        "description": "필수\nvoteAnswerId: Long\n\n사용자의 당일 투표 답변 기반 매칭.\n- KST 기준 당일 23:00 이후에는 신규 매칭 요청을 생성하지 않는다.\n- 동일 vote_question_id를 기준으로 매칭한다.\n- 동일 질문에서 A 선택 사용자 2명 + B 선택 사용자 2명이 모이면 4인 채팅방을 생성한다.\n- 필요한 인원보다 WAITING 요청이 많으면 created_at ASC, 동률은 match_request_id ASC FIFO로 선택한다.\n- KST 23:00 시점에 남아 있는 모든 WAITING 요청은 EXPIRED로 변경하고 이후 추가 매칭하지 않는다.",
+        "x-api-owner": "Backend",
+        "description": "필수\nvoteAnswerId: Long\n\n사용자의 당일 투표 답변 기반 매칭.\n- KST 기준 당일 23:00 이후에는 신규 매칭 요청을 생성하지 않는다.\n- 동일 vote_question_id를 기준으로 매칭한다.\n- 매칭 서비스의 선정 규칙으로 사용자 쌍이 확정되면 Backend가 두 사용자를 Chat Server에 전달해 1:1 채팅방을 생성한다. 매칭 후보 선정 규칙은 Backend 소유이며 이 Chat Server 계약에서 변경하지 않는다.\n- 필요한 인원보다 WAITING 요청이 많으면 created_at ASC, 동률은 match_request_id ASC FIFO로 선택한다.\n- KST 23:00 시점에 남아 있는 모든 WAITING 요청은 EXPIRED로 변경하고 이후 추가 매칭하지 않는다.",
         "responses": {
           "201": {
             "description": "새 매칭 요청 자원이 생성되므로 201.",
@@ -6082,7 +6112,8 @@
         ],
         "summary": "매칭 상태 조회",
         "operationId": "getApiMatchRequestsMatchRequestId",
-        "description": "필수\nmatchRequestId: Long\n\n프론트 polling으로 WAITING/MATCHED/EXPIRED 상태를 조회한다. 요청 소유자만 조회 가능.\n\n정책 및 설명\n- 현재 로그인한 사용자의 매칭 요청 상태를 조회한다.\n- 인증된 활성 사용자만 사용할 수 있다.\n- 프론트는 polling 방식으로 상태를 조회한다.\n- 매칭 상태는 WAITING, MATCHED, EXPIRED 중 하나이다.\n- WAITING이면 아직 매칭이 완료되지 않은 상태이다.\n- MATCHED이면 4인 매칭이 완료된 상태이며 chatRoomId를 반환한다.\n- EXPIRED이면 당일 매칭이 성사되지 않아 만료된 상태이다.\n- 요청 소유자만 조회할 수 있다.\n- 존재하지 않는 요청 또는 현재 사용자 소유가 아닌 요청은 동일하게 404 처리한다.",
+        "x-api-owner": "Backend",
+        "description": "필수\nmatchRequestId: Long\n\n프론트 polling으로 WAITING/MATCHED/EXPIRED 상태를 조회한다. 요청 소유자만 조회 가능.\n\n정책 및 설명\n- 현재 로그인한 사용자의 매칭 요청 상태를 조회한다.\n- 인증된 활성 사용자만 사용할 수 있다.\n- 프론트는 polling 방식으로 상태를 조회한다.\n- 매칭 상태는 WAITING, MATCHED, EXPIRED 중 하나이다.\n- WAITING이면 아직 매칭이 완료되지 않은 상태이다.\n- MATCHED이면 두 사용자 간 매칭이 완료된 상태이며 Chat Server의 chatRoomId를 반환한다.\n- EXPIRED이면 당일 매칭이 성사되지 않아 만료된 상태이다.\n- 요청 소유자만 조회할 수 있다.\n- 존재하지 않는 요청 또는 현재 사용자 소유가 아닌 요청은 동일하게 404 처리한다.",
         "responses": {
           "200": {
             "description": "현재 WAITING 상태를 정상 조회하므로 200.\n\n추가 케이스: 매칭 완료 상태와 채팅방 식별자를 정상 반환하므로 200.\n\n추가 케이스: 만료된 매칭 요청도 존재하는 자원의 현재 상태 조회이므로 200.",
@@ -6202,7 +6233,9 @@
         ],
         "security": [
           {
-            "bearerAuth": []
+            "bearerAuth": [
+
+            ]
           }
         ],
         "x-implementation-status": "contract-only"
@@ -6215,10 +6248,10 @@
         ],
         "summary": "채팅방 입장",
         "operationId": "postApiChatRoomsChatRoomIdMembers",
-        "description": "필수\nchatRoomId: Long\n\n매칭 참가자만 입장 가능. 최초 실제 입장 시 joined_at을 기록하며 left_at이 설정된 사용자는 재입장할 수 없다.",
+        "description": "필수\nchatRoomId: Long\n\n인증된 매칭 참가자만 입장할 수 있다. 최초 입장 시 joined_at을 기록한다. 입장 완료 및 미퇴장 참가자의 재요청/재연결은 중복 입장을 만들지 않는다. left_at이 설정된 사용자는 재입장할 수 없다. 매 요청에서 expires_at을 확인하며 만료 후 입장을 거절한다.",
         "responses": {
           "200": {
-            "description": "기존 participant의 입장 상태 변경이 완료되었으므로 200.",
+            "description": "최초 입장 또는 이미 입장한 활성 참가자의 멱등 재요청을 정상 처리했으므로 200.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6304,7 +6337,7 @@
             }
           },
           "403": {
-            "description": "채팅방 존재와 참가자임은 확인됐지만 정책상 재입장 권한이 없으므로 403.",
+            "description": "퇴장자 재입장 또는 만료된 채팅방 접근은 403.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6318,9 +6351,19 @@
                     }
                   }
                 },
-                "example": {
-                  "code": "CHAT_REENTRY_FORBIDDEN",
-                  "message": "퇴장한 채팅방에는 다시 입장할 수 없습니다."
+                "examples": {
+                  "reentryForbidden": {
+                    "value": {
+                      "code": "CHAT_REENTRY_FORBIDDEN",
+                      "message": "퇴장한 채팅방에는 다시 입장할 수 없습니다."
+                    }
+                  },
+                  "expired": {
+                    "value": {
+                      "code": "CHAT_ROOM_EXPIRED",
+                      "message": "만료된 채팅방에는 입장할 수 없습니다."
+                    }
+                  }
                 }
               }
             }
@@ -6381,8 +6424,15 @@
             }
           }
         ],
-        "x-implementation-status": "contract-only",
-        "x-csrf-required": true
+        "security": [
+          {
+            "bearerAuth": [
+
+            ]
+          }
+        ],
+        "x-api-owner": "Chat Server",
+        "x-implementation-status": "contract-only"
       }
     },
     "/api/chat-rooms/{chatRoomId}": {
@@ -6392,10 +6442,10 @@
         ],
         "summary": "채팅방 정보 조회",
         "operationId": "getApiChatRoomsChatRoomId",
-        "description": "필수\nchatRoomId: Long\n\n참가자에게 채팅방 정보와 참여자 닉네임만 노출한다.",
+        "description": "필수\nchatRoomId: Long\n\n입장 완료 및 미퇴장한 매칭 참가자만 조회할 수 있다. 응답에는 해당 1:1 채팅방의 두 참가자 userId와 nickname을 반환한다. 만료된 방은 조회할 수 없다.",
         "responses": {
           "200": {
-            "description": "접근 가능한 채팅방 메타데이터 조회 성공이므로 200.\n\nsenderId는 \nchat_room_participants.user_id\nusers.nickname\n을 이용하므로 테이블 변경은 없다",
+            "description": "입장 완료 및 미퇴장 참가자에게 채팅방과 두 참가자 정보를 반환했으므로 200.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6413,6 +6463,8 @@
                         },
                         "participants": {
                           "type": "array",
+                          "minItems": 2,
+                          "maxItems": 2,
                           "items": {
                             "type": "object",
                             "properties": {
@@ -6436,20 +6488,12 @@
                     "chatRoomId": 30,
                     "participants": [
                       {
-                        "userId": 12,
-                        "nickname": "가나다"
+                        "userId": 17,
+                        "nickname": "jettie"
                       },
                       {
-                        "userId": 34,
-                        "nickname": "나다라"
-                      },
-                      {
-                        "userId": 56,
-                        "nickname": "다라마"
-                      },
-                      {
-                        "userId": 78,
-                        "nickname": "라마바"
+                        "userId": 28,
+                        "nickname": "lulu"
                       }
                     ]
                   }
@@ -6525,6 +6569,28 @@
               }
             }
           },
+          "403": {
+            "description": "채팅방이 만료되어 조회할 수 없는 경우 403.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "code": "CHAT_ROOM_EXPIRED",
+                  "message": "만료된 채팅방은 조회할 수 없습니다."
+                }
+              }
+            }
+          },
           "404": {
             "description": "삭제된 방 또는 비참가자 접근은 404.",
             "content": {
@@ -6581,6 +6647,14 @@
             }
           }
         ],
+        "security": [
+          {
+            "bearerAuth": [
+
+            ]
+          }
+        ],
+        "x-api-owner": "Chat Server",
         "x-implementation-status": "contract-only"
       }
     },
@@ -6591,7 +6665,7 @@
         ],
         "summary": "채팅 메시지 내역 조회",
         "operationId": "getApiChatRoomsChatRoomIdMessages",
-        "description": "필수\nchatRoomId: Long\n\nCursor 페이지네이션, 페이지 크기 기본값은 30 (최대값 제한 100). 방이 물리 삭제되면 메시지 이력도 더 이상 조회할 수 없다.",
+        "description": "필수\nchatRoomId: Long\n\n기본 20개 커서 페이지네이션이다. createdAt + chatMessageId 오름차순을 안정적인 정렬 키로 사용한다. 최초 조회는 최신 20개를 선택한 후 화면에서 오래된 메시지가 위에 오도록 오래된 순서로 반환한다. 다음 페이지는 현재 페이지보다 오래된 메시지다. 응답에 nextCursor와 hasNext를 포함한다. 만료된 채팅방은 조회할 수 없다. joined_at이 없는 사용자는 조회할 수 없다. left_at이 설정된 참가자는 과거 메시지를 조회할 수 없으며 403 CHAT_ALREADY_LEFT를 받는다. 프론트엔드는 이 응답 시 기존 메시지 목록을 제거하고 `이미 퇴장한 채팅방입니다.` 안내를 표시한다. 참가자가 아닌 사용자는 404 CHAT_ROOM_NOT_FOUND를 받는다. 퇴장 시 메시지 행을 삭제하지 않는다.",
         "responses": {
           "200": {
             "description": "채팅 메시지 이력을 정상 조회했으므로 200.\n\n추가 케이스: 채팅 메시지 이력을 정상 조회했으며 마지막 페이지이므로 200.\n\n추가 케이스: 조회 가능한 메시지가 없더라도 정상적인 조회 결과이므로 200.",
@@ -6611,11 +6685,15 @@
                           "items": {
                             "type": "object",
                             "properties": {
-                              "messageId": {
+                              "chatMessageId": {
                                 "type": "integer",
                                 "format": "int64"
                               },
-                              "senderId": {
+                              "clientMessageId": {
+                                "type": "string",
+                                "format": "uuid"
+                              },
+                              "userId": {
                                 "type": "integer",
                                 "format": "int64"
                               },
@@ -6626,13 +6704,18 @@
                                 "type": "string"
                               },
                               "createdAt": {
-                                "type": "string"
+                                "type": "string",
+                                "format": "date-time"
                               }
                             }
                           }
                         },
                         "nextCursor": {
-                          "type": "string"
+                          "type": "string",
+                          "nullable": true
+                        },
+                        "hasNext": {
+                          "type": "boolean"
                         }
                       }
                     }
@@ -6643,21 +6726,23 @@
                   "data": {
                     "messages": [
                       {
-                        "messageId": 301,
-                        "senderId": 12,
+                        "chatMessageId": 301,
+                        "clientMessageId": "550e8400-e29b-41d4-a716-446655440000",
+                        "userId": 17,
                         "nickname": "가나다",
                         "content": "안녕하세요",
-                        "createdAt": "..."
+                        "createdAt": "2026-10-13T15:30:00+09:00"
                       }
                     ],
-                    "nextCursor": "exampleCursor"
+                    "nextCursor": "exampleCursor",
+                    "hasNext": true
                   }
                 }
               }
             }
           },
           "400": {
-            "description": "chatRoomId가 API에서 요구하는 식별자 형식을 만족하지 않으므로 400.\n\n추가 케이스: cursor가 서버가 발급한 유효한 페이지 탐색 기준으로 해석될 수 없으므로 400.\n\n추가 케이스: size가 API에서 허용하는 페이지 크기 범위인 1~100을 벗어났으므로 400.",
+            "description": "chatRoomId가 API에서 요구하는 식별자 형식을 만족하지 않으므로 400.\n\n추가 케이스: cursor가 서버가 발급한 유효한 페이지 탐색 기준으로 해석될 수 없으므로 400.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6724,8 +6809,42 @@
               }
             }
           },
+          "403": {
+            "description": "채팅방이 만료됐거나 퇴장한 참가자가 메시지 조회를 요청한 경우 403. 퇴장 요청의 응답은 CHAT_ALREADY_LEFT다.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "examples": {
+                  "chatAlreadyLeft": {
+                    "summary": "퇴장한 참가자의 메시지 조회",
+                    "value": {
+                      "code": "CHAT_ALREADY_LEFT",
+                      "message": "이미 퇴장한 채팅방입니다."
+                    }
+                  },
+                  "chatRoomExpired": {
+                    "summary": "만료된 채팅방의 메시지 조회",
+                    "value": {
+                      "code": "CHAT_ROOM_EXPIRED",
+                      "message": "만료된 채팅방의 메시지는 조회할 수 없습니다."
+                    }
+                  }
+                }
+              }
+            }
+          },
           "404": {
-            "description": "삭제된 방 또는 비참가자 접근은 404.",
+            "description": "삭제된 채팅방 또는 채팅방 참가자가 아닌 사용자의 접근은 404 CHAT_ROOM_NOT_FOUND. 퇴장한 참가자는 403 CHAT_ALREADY_LEFT다.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6786,19 +6905,16 @@
             "schema": {
               "type": "string"
             }
-          },
-          {
-            "name": "size",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 30,
-              "minimum": 1,
-              "maximum": 100
-            }
           }
         ],
+        "security": [
+          {
+            "bearerAuth": [
+
+            ]
+          }
+        ],
+        "x-api-owner": "Chat Server",
         "x-implementation-status": "contract-only"
       }
     },
@@ -6809,10 +6925,10 @@
         ],
         "summary": "채팅방 퇴장",
         "operationId": "postApiChatRoomsChatRoomIdLeave",
-        "description": "필수\nchatRoomId: Long\n\nparticipant.left_at을 기록하고 남은 참가자에게 퇴장 사실을 알린다. 4명 모두 퇴장하면 방을 물리 삭제할 수 있다. 자정에도 방을 물리 삭제하는 정책.",
+        "description": "필수\nchatRoomId: Long\n\n인증된 참가자의 left_at을 기록한다. 상대 참가자에게는 `MULO_Chat_STOMP_v2.0.md`에 정의된 `/user/queue/chat-events`로 퇴장 이벤트를 전달한다. 퇴장 후 재입장과 메시지 송신·실시간 수신은 허용하지 않는다. 두 참가자 중 한 명이라도 퇴장하면 메시지 전송을 허용하지 않는다. 만료된 채팅방은 퇴장 API로 접근할 수 없다.",
         "responses": {
           "200": {
-            "description": "참가자의 퇴장 상태 변경이 정상 완료되었으므로 200.",
+            "description": "참가자의 left_at 변경이 정상 완료되고 상대에게 퇴장 이벤트가 전달됐으므로 200.",
             "content": {
               "application/json": {
                 "schema": {
@@ -6897,6 +7013,28 @@
               }
             }
           },
+          "403": {
+            "description": "만료된 채팅방에서는 퇴장 처리할 수 없으므로 403.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "example": {
+                  "code": "CHAT_ROOM_EXPIRED",
+                  "message": "만료된 채팅방에는 접근할 수 없습니다."
+                }
+              }
+            }
+          },
           "404": {
             "description": "삭제된 방 또는 비참가자 접근은 404.",
             "content": {
@@ -6975,8 +7113,343 @@
             }
           }
         ],
-        "x-implementation-status": "contract-only",
-        "x-csrf-required": true
+        "security": [
+          {
+            "bearerAuth": [
+
+            ]
+          }
+        ],
+        "x-api-owner": "Chat Server",
+        "x-implementation-status": "contract-only"
+      }
+    },
+    "/internal/chat-rooms": {
+      "post": {
+        "tags": [
+          "CHAT INTERNAL / Chat Server 내부 연동"
+        ],
+        "summary": "내부 채팅방 생성 또는 멱등 조회",
+        "operationId": "postInternalChatRooms",
+        "description": "Backend가 매칭 성사 후 Chat Server에 호출한다. Backend는 매칭 성사 날짜의 다음 날 00:00:00 Asia/Seoul을 expiresAt으로 계산해 보낸다.\n\n- 신규 생성은 201 Created와 chatRoomId를 반환한다.\n- 같은 matchId, 두 participant, expiresAt 재요청은 200 OK와 기존 chatRoomId를 반환한다.\n- 이미 존재하는 matchId의 participant 또는 expiresAt이 다르면 409 CHAT_ROOM_CONFLICT다.\n- 기존 방이 없는 만료 매칭의 신규 생성은 409 CHAT_ROOM_EXPIRED다. 기존 방 멱등 재요청과 구분한다.\n- 참가자는 정확히 2명이어야 한다.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "matchId",
+                  "expiresAt",
+                  "participants"
+                ],
+                "properties": {
+                  "matchId": {
+                    "type": "integer",
+                    "format": "int64"
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time",
+                    "description": "Backend가 매칭 성사 날짜 다음 날 00:00:00 Asia/Seoul로 계산한 만료 시각"
+                  },
+                  "participants": {
+                    "type": "array",
+                    "minItems": 2,
+                    "maxItems": 2,
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "userId",
+                        "nickname"
+                      ],
+                      "properties": {
+                        "userId": {
+                          "type": "integer",
+                          "format": "int64"
+                        },
+                        "nickname": {
+                          "type": "string",
+                          "maxLength": 10
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "example": {
+                "matchId": 50,
+                "expiresAt": "2026-10-14T00:00:00+09:00",
+                "participants": [
+                  {
+                    "userId": 17,
+                    "nickname": "jettie"
+                  },
+                  {
+                    "userId": 28,
+                    "nickname": "lulu"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "신규 채팅방을 생성했다.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "chatRoomId"
+                  ],
+                  "properties": {
+                    "chatRoomId": {
+                      "type": "integer",
+                      "format": "int64"
+                    }
+                  }
+                },
+                "example": {
+                  "chatRoomId": 30
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "동일한 매칭·참가자·만료 시각의 기존 채팅방을 멱등 반환했다.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "chatRoomId"
+                  ],
+                  "properties": {
+                    "chatRoomId": {
+                      "type": "integer",
+                      "format": "int64"
+                    }
+                  }
+                },
+                "example": {
+                  "chatRoomId": 30
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "요청값 형식이 잘못됐거나 참가자가 정확히 두 명이 아니다.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "code": "INVALID_INPUT_VALUE",
+                  "message": "입력값을 확인해주세요."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "내부 API Key가 없거나 유효하지 않다.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "code": "UNAUTHORIZED",
+                  "message": "내부 인증에 실패했습니다."
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "기존 matchId의 참가자/만료 시각 불일치 또는 신규 생성 매칭 만료.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "matchConflict": {
+                    "value": {
+                      "code": "CHAT_ROOM_CONFLICT",
+                      "message": "동일 매칭 ID의 채팅방 정보가 기존 요청과 다릅니다."
+                    }
+                  },
+                  "expiredMatch": {
+                    "value": {
+                      "code": "CHAT_ROOM_EXPIRED",
+                      "message": "만료된 매칭은 새 채팅방을 생성할 수 없습니다."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "internalApiKey": [
+
+            ]
+          }
+        ],
+        "x-api-owner": "Chat Server",
+        "x-implementation-status": "contract-only"
+      }
+    },
+    "/internal/chat-rooms/by-match/{matchId}": {
+      "get": {
+        "tags": [
+          "CHAT INTERNAL / Chat Server 내부 연동"
+        ],
+        "summary": "매칭 ID로 채팅방 조회",
+        "operationId": "getInternalChatRoomsByMatchId",
+        "description": "Backend가 채팅방 생성 요청 타임아웃 후 생성 성공 여부를 복구 조회하는 내부 API다. 만료 여부와 관계없이 해당 matchId의 기존 chatRoomId를 조회한다.",
+        "parameters": [
+          {
+            "name": "matchId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "기존 채팅방을 찾았다.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "chatRoomId"
+                  ],
+                  "properties": {
+                    "chatRoomId": {
+                      "type": "integer",
+                      "format": "int64"
+                    }
+                  }
+                },
+                "example": {
+                  "chatRoomId": 30
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "내부 API Key가 없거나 유효하지 않다.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "code": "UNAUTHORIZED",
+                  "message": "내부 인증에 실패했습니다."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "해당 matchId의 채팅방이 없다.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "code": "CHAT_ROOM_NOT_FOUND",
+                  "message": "채팅방을 찾을 수 없습니다."
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "internalApiKey": [
+
+            ]
+          }
+        ],
+        "x-api-owner": "Chat Server",
+        "x-implementation-status": "contract-only"
+      }
+    },
+    "/internal/auth/verify": {
+      "post": {
+        "tags": [
+          "BACKEND AUTH INTEGRATION / Backend 인증 연동"
+        ],
+        "summary": "Backend Access Token 검증 연동",
+        "operationId": "postInternalAuthVerifyExternal",
+        "description": "**Backend 소유 API**다. Chat Server가 JWT를 검증할 때 호출하는 외부 연동 계약이며 이 경로는 Chat Server API 구현 범위가 아니다.\n\nBackend는 JWT 서명, 만료, tokenType=access, 사용자 활성 상태를 확인한다. Chat Server와 HS256 JWT_SECRET을 공유하지 않는다. Refresh Token은 Backend에서만 관리한다.",
+        "responses": {
+          "200": {
+            "description": "Access Token이 유효하며 활성 사용자가 확인됐다.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "userId",
+                    "expiresAt"
+                  ],
+                  "properties": {
+                    "userId": {
+                      "type": "integer",
+                      "format": "int64"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                },
+                "example": {
+                  "userId": 17,
+                  "expiresAt": "2026-10-13T19:00:00+09:00"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Internal API Key 또는 Bearer Access Token 검증 실패.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "example": {
+                  "code": "UNAUTHORIZED",
+                  "message": "인증에 실패했습니다."
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "internalApiKey": [
+
+            ],
+            "bearerAuth": [
+
+            ]
+          }
+        ],
+        "x-api-owner": "Backend",
+        "x-external-integration": true,
+        "x-implementation-status": "contract-only"
       }
     },
     "/api/notifications": {
@@ -7751,7 +8224,9 @@
         "description": "현재 사용자의 삭제되지 않은 모든 자물쇠를 법정동 코드 기준으로 그룹화해 반환한다.\n\n- 최근 7일 제한을 적용하지 않는다.\n- 그룹 키는 `places.legal_dong_code`, 표시명은 `places.legal_dong_name`이다.\n- 법정동 미확인 자물쇠는 `legalDongCode=null`, `legalDongName=null`인 하나의 그룹으로 반환한다.\n- 프론트는 NULL 그룹을 `확인할 수 없음` 폴더로 표시한다.\n- 각 그룹의 `recordsCount`는 현재 사용자의 삭제되지 않은 전체 자물쇠 수다.",
         "security": [
           {
-            "bearerAuth": []
+            "bearerAuth": [
+
+            ]
           }
         ],
         "responses": {
@@ -7848,7 +8323,9 @@
         "summary": "클러스터/장소 인기 음악 조회",
         "description": "필수\nplaceIds: List<Long> (1개 이상)\n\n선택\n없음\n\n정책\n- 비로그인 사용자도 조회할 수 있다.\n- 전달받은 모든 placeIds를 하나의 조회 범위로 합산한다.\n- Record의 placeId가 placeIds에 포함되는 기록만 집계한다.\n- 삭제된 Record는 제외한다.\n- API 조회 시점을 기준으로\n직전 7일 동안 생성된 Record만 집계한다.\n- recordCount는 선택된 placeIds 전체의\n최근 7일 활성 Record 총개수이다.\n- music[].count는 최근 7일 활성 Record 중\n해당 음악이 등록된 횟수이다.\n- 음악별 count DESC로 정렬한다.\n- count가 같으면 해당 음악의\n가장 최근 Record 생성 시각이 최신인 음악을 우선한다.\n- 클러스터링은 프론트의\nKakao MarkerClusterer가 담당한다.\n- 백엔드는 클러스터를 관리하지 않고\n전달받은 placeIds만 처리한다.\n- 개별 마커 클릭은 placeIds에\n1개의 ID를 전달해 동일하게 처리한다.\n- Cursor pagination과 클라이언트 size 입력은\n사용하지 않는다.\n\n정책 및 설명\n- 선택된 placeIds 전체의 삭제되지 않은 Record를 합산한다.\n- 조회 시점 기준 직전 7일의 Record만 집계한다.\n- recordCount와 music[].count 모두 최근 7일 기준이다.\n- 음악별 count DESC로 정렬하고 동률이면\n가장 최근 Record 생성 시각이 최신인 음악을 우선한다.\n- 개별 마커와 클러스터 클릭을 같은 API로 처리한다.\n- 클러스터 ID나 행정구역 정보는 전달하지 않는다.\n- Cursor pagination, size, TOP N 제한은 현재 명세에 적용하지 않는다.",
         "operationId": "post_api_places_popular_tracks_search",
-        "security": [],
+        "security": [
+
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -7954,7 +8431,9 @@
                       "message": "인기 음악 조회 성공",
                       "data": {
                         "recordCount": 0,
-                        "music": []
+                        "music": [
+
+                        ]
                       }
                     }
                   }
@@ -8066,7 +8545,9 @@
         "operationId": "post_api_users_me_records_search",
         "security": [
           {
-            "bearerAuth": []
+            "bearerAuth": [
+
+            ]
           }
         ],
         "requestBody": {
@@ -8183,7 +8664,9 @@
                     "value": {
                       "message": "내 자물쇠 목록 조회 성공",
                       "data": {
-                        "records": [],
+                        "records": [
+
+                        ],
                         "nextCursor": null
                       }
                     }
@@ -8321,6 +8804,12 @@
   },
   "components": {
     "securitySchemes": {
+      "internalApiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Internal-Api-Key",
+        "description": "내부 서버 간 인증용 Secret. 사용자 JWT와 별도로 Secret Manager 또는 환경변수에서 주입한다."
+      },
       "bearerAuth": {
         "type": "http",
         "scheme": "bearer",

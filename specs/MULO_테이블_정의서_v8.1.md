@@ -5,6 +5,8 @@
 > 설계·정책 기준: 테이블 정의서 v7.6, 서비스 정책 정의서 v1.9, OpenAPI v2.6, 현재 구현 문서  
 > 원칙: Flyway에 존재하는 구조와 목표 정책이 다르면 둘을 분리해 기록하고 미확정 사항은 `Open Question`으로 유지한다.
 
+> **Chat Server 스키마 범위:** §§19–21은 통합 Backend DB의 과거 채팅 설계가 아니라 `/Users/j/Desktop/mulo-chat`의 독립 `mulo_chat` DB를 기준으로 한다. Chat Server V1의 실제 구조는 `mulo-chat/src/main/resources/db/migration/V1__create_chat_tables.sql`이며, 목표 정책과의 차이는 V2 예정 변경으로 별도 표시한다. V1 migration은 이 문서 작업에서 수정하지 않는다.
+
 ### 문서 상태 표기
 
 | 상태 | 의미 |
@@ -36,14 +38,14 @@
 - 지도 마커의 개별 장소와 클러스터는 담당 팀원 계약에 따라 `POST /api/places/popular-tracks/search`, `POST /api/users/me/records/search` Body의 `placeIds`로 함께 처리한다. ID 1개는 개별 장소, 여러 개는 클러스터를 의미하며 기존 단일 장소 GET 계약은 사용하지 않는다
 - 인기 지도 마커에는 최근 7일 기준 `recordsCount`, 내 자물쇠 지도 마커에는 전체 기간 기준 `myRecordsCount`를 제공한다
 - 사용자 자물쇠 대시보드는 별도 dashboard 테이블을 만들지 않고 `records`를 `places.legal_dong_code` 기준으로 그룹 조회한다. 폴더 표시명은 `legal_dong_name`이다
-- 커서 기반 목록 API의 `size`는 기본 20, 최대 100이며 채팅 메시지 내역만 기본 30을 유지한다
+- Chat Server 메시지 내역은 20개 단위 커서 페이징을 사용한다
 - Kakao SDK 호출 자체가 실패한 경우에는 NULL 법정동으로 간주하지 않고 프론트에서 생성 요청을 중단하거나 재시도한다. 기존 OQ-025는 이 정책으로 해소된다
 - 레거시 `weather`를 23번으로 명시하고 `weather_grids`, `weather_grid_forecasts`를 24~25번으로 배치
 - 날씨 캐시는 `(weather_grid_id, forecast_at)` 유일성 보장
 - `records.weather_condition`은 7개 상태 `CLEAR/CLOUDY/OVERCAST/RAIN/SNOW/RAIN_SNOW/SHOWER`만 저장
 - `record_drafts`는 기존 설계 내용을 보존하고 `[V1 제외]`로 표시
 - AI 기억 검색 및 Spotify 계정 저장 기능은 V1 범위에서 제외
-- `chat_rooms.selected_option`은 두지 않음(A 2명 + B 2명 구성)
+- Chat Server 채팅방은 매칭된 두 사용자의 1:1 구조다
 - 기존 사진/업로드/친구/리포트/투표/매칭/채팅/알림 구조는 동기화 설계서와 충돌하지 않는 범위에서 유지
 
 ---
@@ -97,8 +99,8 @@
 | `monthly_reports` | `users.user_id` ↔ `monthly_reports.user_id` | 1:N | 한 사용자는 월별로 여러 리포트를 가질 수 있으며, 각 월간 리포트는 한 사용자의 기록을 기준으로 생성된다. |
 | `vote_answers` | `users.user_id` ↔ `vote_answers.user_id` | 1:N | 한 사용자는 여러 취향 투표에 참여할 수 있으며 각 투표 답변의 작성자를 식별한다. |
 | `match_requests` | `users.user_id` ↔ `match_requests.user_id` | 1:N | 한 사용자는 서로 다른 날짜에 여러 매칭 요청을 생성할 수 있으며, 각 매칭 요청은 한 사용자에게 속한다. |
-| `chat_room_participants` | `users.user_id` ↔ `chat_room_participants.user_id` | 1:N | 사용자가 참여한 채팅방과 참여 상태를 관리하기 위해 연결한다. |
-| `chat_messages` | `users.user_id` ↔ `chat_messages.user_id` | 1:N | 한 사용자는 채팅방에서 여러 메시지를 전송할 수 있으며 메시지의 발신자를 식별한다. |
+| Chat Server 참여자 | Backend `users.user_id` ↔ Chat `chat_room_participants.user_id` | 서비스 간 논리 참조 | Backend 인증 확인 API가 검증한 사용자 ID를 사용하며 DB 간 물리 FK는 없다. |
+| Chat Server 메시지 | Backend `users.user_id` ↔ Chat `chat_messages.user_id` | 서비스 간 논리 참조 | 메시지 발신자는 Backend가 검증한 사용자 ID이며 DB 간 물리 FK는 없다. |
 | `notifications` | `users.user_id` ↔ `notifications.user_id` | 1:N | 한 사용자는 친구 요청, 매칭 완료 등 서비스에서 발생하는 여러 알림을 받을 수 있다. |
 | `refresh_tokens` | `users.user_id` ↔ `refresh_tokens.user_id` | 1:1 | 각 Refresh Token은 한 사용자에게 속하며, 한 사용자는 로그인 세션에서 한 Refresh Token을 발급받을 수 있다. |
 | `uploads` | `users.user_id` ↔ `uploads.user_id` | 1:N | 한 사용자는 자물쇠 생성 과정에서 여러 임시 이미지를 업로드할 수 있으며, 각 임시 업로드는 한 명의 소유 사용자에게 속한다. |
@@ -276,7 +278,7 @@ Access Token 재발급에 사용되는 Refresh Token의 유효 상태를 서버�
 | `rule_my_marker_count` | 내 자물쇠 지도 마커의 `myRecordsCount`는 해당 장소에 저장된 현재 사용자의 전체 삭제되지 않은 자물쇠 수이며 7일 제한을 적용하지 않는다. |
 | `rule_user_record_region_group` | 현재 사용자의 자물쇠 지역 폴더는 `places.legal_dong_code` 기준으로 그룹화하고 `places.legal_dong_name`을 표시명으로 사용한다. `legal_dong_code IS NULL`은 하나의 미확인 그룹으로 묶어 UI에서 `확인할 수 없음`으로 표시한다. |
 | `rule_user_record_region_detail` | 지역 폴더 선택 시 해당 법정동 그룹에 속한 현재 사용자의 삭제되지 않은 자물쇠 목록을 조회하며, 자물쇠 선택 시 기존 자물쇠 상세 조회를 사용한다. |
-| `rule_cursor_page_size` | 커서 기반 목록 조회의 `size` 기본값은 20, 최대값은 100이다. |
+| `rule_cursor_page_size` | 일반 커서 기반 목록 조회의 기본값은 20, 최대값은 100이다. Chat Server 메시지 내역은 페이지당 20개로 고정한다. |
 
 #### 4. 관계
 
@@ -754,7 +756,7 @@ Access Token 재발급에 사용되는 Refresh Token의 유효 상태를 서버�
 
 #### 1. 테이블 설명
 
-사용자가 취향 투표 질문에서 선택한 답변을 저장하는 테이블이다. 어떤 사용자가 어떤 질문에서 어떤 선택지를 선택했는지 기록하며, 이후 동일 질문에서 A 선택 2명과 B 선택 2명을 구성하는 매칭의 기준 데이터로 사용한다.
+사용자가 취향 투표 질문에서 선택한 답변을 저장하는 Backend 테이블이다. 어떤 사용자가 어떤 질문에서 어떤 선택지를 선택했는지 기록한다. 매칭 후보 선정은 Backend 소유이며 Chat Server는 이 답변 데이터를 저장하거나 해석하지 않는다. 채팅방 참가자는 매칭된 두 사용자다.
 
 #### 2. 컬럼 정의
 
@@ -763,7 +765,7 @@ Access Token 재발급에 사용되는 Refresh Token의 유효 상태를 서버�
 | `vote_answer_id` | `BIGINT` | - | NOT NULL | `AUTO_INCREMENT` | PK | 취향 투표 답변 고유 ID | 각각의 투표 답변을 고유하게 식별하기 위해 사용하며 데이터 증가 가능성을 고려해 `BIGINT`를 사용한다. | 개별 투표 답변을 식별하고 매칭 등의 다른 데이터에서 특정 답변을 참조할 수 있게 한다. |
 | `vote_question_id` | `BIGINT` | - | NOT NULL | - | FK | 사용자가 답변한 취향 투표 질문 ID | `vote_questions.vote_question_id`를 참조한다. | 어떤 질문에 대한 답변인지 식별한다. |
 | `user_id` | `BIGINT` | - | NOT NULL | - | FK | 취향 투표에 참여한 사용자 ID | `users.user_id`를 참조한다. | 누가 해당 답변을 선택했는지 식별한다. |
-| `selected_option` | `VARCHAR` | 100 | NOT NULL | - | - | 사용자가 선택한 선택지 | 두 개의 선택지 중 어떤 것을 선택했는지 실제 선택지 텍스트로 저장한다. | 동일 질문의 매칭 대상에서 A/B 선택 인원을 판별하여 A 2명 + B 2명 구성을 만드는 데 사용한다. |
+| `selected_option` | `VARCHAR` | 100 | NOT NULL | - | - | 사용자가 선택한 선택지 | 두 개의 선택지 중 어떤 것을 선택했는지 실제 선택지 텍스트로 저장한다. | Backend 매칭 정책에서 투표 선택을 판단할 때 사용한다. Chat Server는 선택지를 참조하지 않는다. |
 | `created_at` | `DATETIME` | - | NOT NULL | `CURRENT_TIMESTAMP` | - | 사용자가 투표한 시각 | 사용자가 실제로 답변을 제출한 시점을 기록한다. | 투표 참여 시점을 확인하고 답변 이력을 관리한다. |
 
 #### 3. 제약조건
@@ -788,8 +790,7 @@ Access Token 재발급에 사용되는 Refresh Token의 유효 상태를 서버�
 
 #### 1. 테이블 설명
 
-사용자가 취향 투표 답변을 기준으로 랜덤 채팅 매칭을 요청한 정보를 저장하는 테이블이다.
-매칭 요청의 대기, 완료, 만료 상태를 관리한다. 동일 질문에서 A 선택 사용자 2명과 B 선택 사용자 2명이 23:00 이전에 모이면 매칭이 완료되어 생성된 채팅방을 해당 요청과 연결한다. 23:00 시점까지 매칭되지 않은 요청은 `EXPIRED`로 변경한다.
+사용자가 취향 투표 답변을 기준으로 매칭을 요청한 정보를 저장하는 Backend 테이블이다. 매칭 요청의 대기, 완료, 만료 상태를 관리한다. 매칭 서비스가 사용자 쌍의 매칭을 확정하면 Backend는 두 사용자를 Chat Server에 전달해 1:1 채팅방을 만든다. 이 테이블 정의는 Backend의 매칭 요청 저장 구조이며 Chat Server DB에는 존재하지 않는다.
 
 #### 2. 컬럼 정의
 
@@ -797,13 +798,11 @@ Access Token 재발급에 사용되는 Refresh Token의 유효 상태를 서버�
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `match_request_id` | `BIGINT` | - | NOT NULL | `AUTO_INCREMENT` | PK | 매칭 요청 고유 ID | 각 매칭 요청을 고유하게 식별하고 데이터 증가 가능성을 고려하여 `BIGINT`를 사용한다. | 개별 매칭 요청을 식별한다. |
 | `user_id` | `BIGINT` | - | NOT NULL | - | FK | 매칭을 요청한 사용자 ID | `users.user_id`를 참조하여 요청자를 식별한다. | 누가 매칭을 요청했는지 확인한다. |
-| `vote_answer_id` | `BIGINT` | - | NOT NULL | - | FK | 매칭 기준이 되는 취향 투표 답변 ID | `vote_answers.vote_answer_id`를 참조하여 사용자가 어떤 질문에서 어떤 답변을 선택했는지 연결한다. | 동일한 `vote_question_id`를 기준으로 A 선택 2명과 B 선택 2명을 구성하는 매칭에 사용한다. |
+| `vote_answer_id` | `BIGINT` | - | NOT NULL | - | FK | 매칭 기준이 되는 취향 투표 답변 ID | `vote_answers.vote_answer_id`를 참조하여 사용자가 어떤 질문에서 어떤 답변을 선택했는지 연결한다. | Backend 매칭 로직에서 요청을 판단하는 기준이다. Chat Server는 투표 답변을 저장하거나 해석하지 않는다. |
 | `status` | `ENUM('WAITING', 'MATCHED', 'EXPIRED')` | - | NOT NULL | `WAITING` | - | 매칭 요청 상태
 ( `WAITING`, `MATCHED`, `EXPIRED`) | 매칭 요청 상태가 `WAITING`, `MATCHED`, `EXPIRED` 세 가지로 확정되어 있으므로 허용 가능한 상태값을 제한하기 위해 `ENUM`을 사용한다. | 매칭 요청이 대기 중인지, 매칭 완료되어 채팅방에 배정되었는지, 정책상 만료된 상태인지를 구분한다. |
 | `created_at` | `DATETIME` | - | NOT NULL | `CURRENT_TIMESTAMP` | - | 매칭 요청 생성 시각 | 실제 매칭 요청이 발생한 시점을 기록한다. | 매칭 요청 시점 기록, 대기 순서 확인 및 일자별 요청 조회 등에 활용한다. |
-| `chat_room_id` | `BIGINT` | - | NULL | NULL | FK | `MATCHED` 상태가 되었을 때 배정된 채팅방 ID
- | `chat_rooms.chat_room_id`를 참조한다. 매칭 대기 중이거나 만료된 요청에는 채팅방이 존재하지 않으므로 `NULL`을 허용한다.
- | 해당 매칭 요청의 결과로 사용자가 어느 채팅방에 배정되었는지 확인한다. |
+| `chat_room_id` | `BIGINT` | - | NULL | NULL | - | `MATCHED` 상태가 되었을 때 배정된 Chat Server 채팅방 ID | Chat Server가 반환한 ID를 저장하는 서비스 간 참조이며, Backend DB와 별도인 `mulo_chat` DB를 대상으로 하므로 물리 FK는 두지 않는다. | 매칭 요청의 결과로 사용자가 어느 Chat Server 방에 배정되었는지 확인한다. |
 
 #### 3. 제약조건
 
@@ -812,7 +811,6 @@ Access Token 재발급에 사용되는 Refresh Token의 유효 상태를 서버�
 | `pk_match_requests` | PRIMARY KEY | `match_request_id` | - | 각 매칭 요청을 고유하게 식별한다. |
 | `fk_match_requests_user` | FOREIGN KEY | `user_id` | `users.user_id` | 존재하는 사용자만 매칭을 요청할 수 있도록 한다. |
 | `fk_match_requests_vote_answer` | FOREIGN KEY | `vote_answer_id` | `vote_answers.vote_answer_id` | 존재하는 취향 투표 답변을 기준으로만 매칭을 요청할 수 있도록 한다. |
-| `fk_match_requests_chat_room` | FOREIGN KEY | `chat_room_id` | `chat_rooms.chat_room_id` | 채팅방에 배정된 경우 실제 존재하는 채팅방만 참조하도록 하며, 채팅방 삭제 시 해당 채팅방에 연결된 매칭 요청도 함께 삭제되도록 `ON DELETE CASCADE`를 적용한다. |
 | `uk_match_requests_vote_answer` | UNIQUE | `vote_answer_id` | - | 하나의 취향 투표 답변으로 매칭 요청이 중복 생성되는 것을 방지한다. 하루 하나의 질문에 대해 사용자당 하나의 답변만 생성되는 정책과 함께 사용되어, 사용자가 해당 일자의 매칭 요청을 한 번만 생성하도록 제한한다. |
 | `chk_match_requests_room_by_status`  | CHECK | `status` , `chat_room_id` | - | `MATCHED` 상태에서는 `chat_room_id`가 반드시 존재하고, `WAITING` 또는 `EXPIRED` 상태에서는 `chat_room_id`가 `NULL`이 되도록 하여 매칭 상태와 채팅방 배정 정보의 일관성을 보장한다. |
 
@@ -820,7 +818,7 @@ Access Token 재발급에 사용되는 Refresh Token의 유효 상태를 서버�
 
 | 규칙명 | 설명 |
 | --- | --- |
-| `rule_match_complete` | 동일한 `vote_question_id`의 `WAITING` 요청 중 A 선택 사용자 2명과 B 선택 사용자 2명이 23:00 이전에 모이면 4인 채팅방을 생성하고 해당 4개 요청을 `MATCHED`로 변경한다. |
+| `rule_match_complete` | Backend 매칭 서비스가 사용자 2명의 매칭을 확정하면 두 사용자와 매칭 ID를 Chat Server에 전달한다. Chat Server는 두 사용자만 참여하는 1:1 채팅방을 생성한다. 매칭 선택 알고리즘은 Backend 소유이며 이 테이블 정의에서 새 기준을 정하지 않는다. |
 | `rule_match_request_cutoff` | 당일 23:00 이후에는 새로운 매칭 요청을 생성하지 않는다. |
 | `rule_match_expire` | 당일 23:00 시점에 아직 `WAITING` 상태인 매칭 요청은 모두 `EXPIRED`로 변경한다. 23:00 이후에는 기존 `WAITING` 요청을 대상으로 추가 매칭을 진행하지 않는다. |
 
@@ -830,43 +828,46 @@ Access Token 재발급에 사용되는 Refresh Token의 유효 상태를 서버�
 | --- | --- | --- | --- |
 | `users` | `match_requests.user_id` → `users.user_id` | N:1 | 한 사용자는 날짜별로 여러 매칭 요청을 가질 수 있으며 각 매칭 요청은 한 사용자에게 속한다. |
 | `vote_answers` | `match_requests.vote_answer_id` → `vote_answers.vote_answer_id` | 1:0..1 | 하나의 투표 답변으로 최대 한 번의 매칭 요청을 할 수 있으며, 매칭 요청은 하나의 투표 답변을 기준으로 한다. |
-| `chat_rooms` | `match_requests.chat_room_id` → `chat_rooms.chat_room_id` | N:0..1 | 여러 매칭 요청이 하나의 채팅방에 배정될 수 있으며, 각 매칭 요청은 최대 하나의 채팅방에 배정된다. |
+| Chat Server 채팅방 | `match_requests.chat_room_id` | 외부 참조 | Backend가 내부 API 응답에서 받은 Chat Server 식별자이며 DB 간 FK는 없다. |
 
 ---
 
-## 19. chat_rooms - 채팅방 테이블
+## 19. chat_rooms - Chat Server 채팅방 테이블
 
 #### 1. 테이블 설명
 
-동일한 `vote_question_id`의 매칭 요청 중 A 선택 사용자 2명과 B 선택 사용자 2명이 모였을 때 생성되는 4인 채팅방을 저장하는 테이블이다. 채팅방 생성 시 매칭된 4명의 사용자가 배정되며, 이후 채팅 참여자와 메시지를 관리하는 기준이 된다. 채팅방은 생성 당일에만 유지되며, 자정이 되거나 참여자 4명이 모두 퇴장하면 삭제된다.
+매칭된 사용자 두 명의 1:1 채팅방을 저장한다. 이 테이블은 Chat Server의 독립 `mulo_chat` 데이터베이스 소유다. `match_id`는 Backend 매칭 식별자이며 Chat Server는 Backend의 투표 테이블을 참조하지 않는다. 만료 시각은 Backend가 매칭 성사 날짜의 다음 날 00:00:00 `Asia/Seoul`로 계산해 전달한다.
+
+> **Migration 상태:** 현재 Chat Server Flyway V1에는 `chat_room_id`, `match_id`, `created_at`만 있다. 아래 `expires_at`은 목표 스키마이며 V1에 적용되어 있지 않다. 이 컬럼은 기존 V1을 수정하지 않고 향후 Flyway V2 migration으로 추가해야 한다.
 
 #### 2. 컬럼 정의
 
 | 컬럼명 | 데이터 타입 | 길이 | NULL 여부 | 기본값 | Key | 설명 | 타입/설계 근거 | 기능적 역할 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `chat_room_id` | `BIGINT` | - | NOT NULL | `AUTO_INCREMENT` | PK | 채팅방 고유 ID | 각 채팅방을 고유하게 식별하고 데이터 증가 가능성을 고려하여 `BIGINT`를 사용한다. | 채팅 참여자와 메시지가 특정 채팅방을 참조할 때 기준 ID로 사용한다. |
-| `vote_question_id` | `BIGINT` | - | NOT NULL | - | FK | 채팅방 매칭의 기준이 된 취향 투표 질문 ID | 동일한 질문에서 A 선택 사용자 2명과 B 선택 사용자 2명을 한 채팅방으로 구성하므로 `vote_questions.vote_question_id`를 참조한다. | 어떤 취향 투표 질문을 기준으로 생성된 채팅방인지 식별한다. |
-| `created_at` | `DATETIME` | - | NOT NULL | `CURRENT_TIMESTAMP` | - | 채팅방 생성 시각 | 4명의 사용자가 모여 채팅방이 실제 생성된 시점을 기록한다. | 채팅방 생성 시점을 확인한다. |
+| `match_id` | `BIGINT` | - | NOT NULL | - | UNIQUE | 채팅방을 생성한 Backend 매칭 ID | Backend가 발급한 매칭 식별자를 저장하며 Chat Server DB에서는 Backend DB를 가리키는 FK를 두지 않는다. 한 매칭의 방 재생성을 방지하기 위해 UNIQUE를 적용한다. | 내부 생성 재요청을 멱등 처리하고 매칭으로 채팅방을 조회한다. |
+| `created_at` | `DATETIME` | - | NOT NULL | `CURRENT_TIMESTAMP` | - | 채팅방 생성 시각 | 실제 채팅방이 생성된 시점을 기록한다. | 채팅방 생성 시점을 확인한다. |
+| `expires_at` | `DATETIME` | - | NOT NULL | 없음 | - | 채팅방 만료 시각 | Backend가 매칭 성사 날짜의 다음 날 00:00:00 KST로 계산한 시각을 저장한다. **향후 V2 migration 대상이며 현재 V1에는 없다.** | 입장, 메시지 전송, 메시지 조회 시점에 만료 여부를 확인한다. |
 
 #### 3. 제약조건
 
 | 제약조건명 | 유형 | 컬럼 | 참조 | 설명 |
 | --- | --- | --- | --- | --- |
 | `pk_chat_rooms` | PRIMARY KEY | `chat_room_id` | - | 각 채팅방을 고유하게 식별한다. |
-| `fk_chat_rooms_vote_question` | FOREIGN KEY | `vote_question_id` | `vote_questions.vote_question_id` | 존재하는 취향 투표 질문을 기준으로 생성된 채팅방만 저장하도록 한다. |
+| `uk_chat_rooms_match` | UNIQUE | `match_id` | - | 하나의 Backend 매칭 ID에 대해 채팅방 하나만 생성한다. |
 
 #### 3-1. 비즈니스 규칙
 
 | 규칙명 | 설명 |
 | --- | --- |
-| `rule_chat_room_match_composition` | 하나의 채팅방은 동일한 `vote_question_id`에서 A 선택 사용자 2명과 B 선택 사용자 2명으로 구성한다. 선택지는 참여자의 `vote_answers.selected_option`에서 판별하며 `chat_rooms`에 단일 선택지 컬럼을 중복 저장하지 않는다. |
+| `rule_chat_room_match_composition` | 하나의 채팅방은 Backend가 매칭한 사용자 두 명으로 구성한다. Chat Server는 매칭 알고리즘이나 투표 선택지를 저장·판단하지 않는다. |
+| `rule_chat_room_expiration` | `expires_at`은 Backend가 매칭 성사 날짜 다음 날 00:00:00 KST로 계산해 전달한다. 만료 후 입장, 메시지 송신 및 조회를 거절한다. 실제 컬럼 추가는 Flyway V2 migration으로 수행한다. |
 
 #### 4. 관계
 
 | 관련 테이블 | 연결 컬럼 | 관계 | 관계 설명 |
 | --- | --- | --- | --- |
-| `vote_questions` | `chat_rooms.vote_question_id` → `vote_questions.vote_question_id` | N:1 | 하나의 취향 투표 질문을 기준으로 여러 개의 채팅방이 생성될 수 있으며, 각 채팅방은 하나의 질문을 기준으로 한다. |
-| `chat_room_participants` | `chat_room_participants.chat_room_id` → `chat_rooms.chat_room_id` | 1:N | 하나의 채팅방에는 매칭이 완료된 4명의 참여자 정보가 생성되며, 각 참여자는 하나의 채팅방에 속한다. |
+| `chat_room_participants` | `chat_room_participants.chat_room_id` → `chat_rooms.chat_room_id` | 1:N | 하나의 채팅방에는 정확히 두 명의 매칭 참가자가 등록된다. 두 명 제한은 DB CHECK가 아닌 내부 생성 API의 애플리케이션 검증으로 보장한다. |
 | `chat_messages` | `chat_messages.chat_room_id` → `chat_rooms.chat_room_id` | 1:N | 하나의 채팅방에는 여러 개의 메시지가 존재할 수 있으며, 각 메시지는 하나의 채팅방에 속한다. |
 
 ---
@@ -875,15 +876,16 @@ Access Token 재발급에 사용되는 Refresh Token의 유효 상태를 서버�
 
 #### 1. 테이블 설명
 
-사용자가 어떤 채팅방에 참여했는지 저장하는 테이블이다. 채팅방과 사용자 간 참여 관계를 관리하며, 사용자의 입장 시점과 퇴장 시점을 기록한다. 한 사용자는 같은 채팅방에 한 번만 참여할 수 있고, 퇴장 후 재입장은 허용하지 않는다.
+사용자가 어떤 채팅방에 참여했는지 저장하는 테이블이다. 참가자의 `user_id`와 당시 표시할 `nickname`, 입장 및 퇴장 시점을 보관한다. Chat Server DB는 Backend 사용자 테이블과 FK로 연결하지 않는다. 한 사용자는 같은 채팅방에 한 번만 참여할 수 있고, 퇴장 후 재입장은 허용하지 않는다.
 
 #### 2. 컬럼 정의
 
 | 컬럼명 | 데이터 타입 | 길이 | NULL 여부 | 기본값 | Key | 설명 | 타입/설계 근거 | 기능적 역할 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `chat_room_participant_id` | `BIGINT` | - | NOT NULL | `AUTO_INCREMENT` | PK | 채팅방 참여 정보 고유 ID | 각 참여 정보를 고유하게 식별하고 데이터 증가 가능성을 고려하여 `BIGINT`를 사용한다. | 개별 채팅방 참여 정보를 식별한다. |
-| `chat_room_id` | `BIGINT` | - | NOT NULL | - | FK | 사용자가 참여한 채팅방 ID | `chat_rooms.chat_room_id`를 참조한다. | 어떤 채팅방에 참여했는지 식별한다. |
-| `user_id` | `BIGINT` | - | NOT NULL | - | FK | 채팅방에 참여한 사용자 ID | `users.user_id`를 참조한다. | 어떤 사용자가 채팅방에 참여했는지 식별한다. |
+| `chat_room_id` | `BIGINT` | - | NOT NULL | - | FK | 사용자가 참여한 채팅방 ID | 같은 `mulo_chat` DB의 `chat_rooms.chat_room_id`를 참조한다. | 어떤 채팅방에 참여했는지 식별한다. |
+| `user_id` | `BIGINT` | - | NOT NULL | - | - | 채팅방에 참여한 사용자 ID | Backend 인증 확인 결과의 사용자 ID를 저장한다. 별도 서비스 DB이므로 Backend `users` 테이블로 FK를 설정하지 않는다. | 어떤 사용자가 채팅방에 참여했는지 식별한다. |
+| `nickname` | `VARCHAR(10)` | 10 | NOT NULL | - | - | 채팅방에서 표시할 사용자 닉네임 | Backend가 내부 생성 API 요청에 포함한 닉네임 스냅샷을 저장한다. | Backend 사용자 테이블을 조회하지 않고 참가자 이름을 표시한다. |
 | `joined_at` | `DATETIME` | - | NULL | NULL | - | 채팅방 최초 입장 시각 | 매칭 완료 시 참여자 정보가 먼저 생성되고 사용자가 실제 채팅방에 입장하기 전에는 입장 시각이 없으므로 `NULL`을 허용한다. | 사용자가 실제로 채팅방에 최초 입장한 시점을 기록한다. |
 | `left_at` | `DATETIME` | - | NULL | NULL | - | 채팅방 퇴장 시각 | 사용자가 아직 채팅방을 나가지 않은 경우 값이 존재하지 않으므로 `NULL`을 허용한다. | `NULL`이면 아직 퇴장하지 않은 상태이고, 값이 있으면 해당 시점에 채팅방을 나간 것으로 판단한다. |
 
@@ -893,23 +895,23 @@ Access Token 재발급에 사용되는 Refresh Token의 유효 상태를 서버�
 | --- | --- | --- | --- | --- |
 | `pk_chat_room_participants` | PRIMARY KEY | `chat_room_participant_id` | - | 각 채팅방 참여 정보를 고유하게 식별한다. |
 | `fk_chat_room_participants_room` | FOREIGN KEY | `chat_room_id` | `chat_rooms.chat_room_id` | 존재하는 채팅방에 대해서만 참여 정보를 저장할 수 있도록 하며, 채팅방 삭제 시 해당 채팅방의 참여자 정보도 함께 삭제되도록 `ON DELETE CASCADE`를 적용한다. |
-| `fk_chat_room_participants_user` | FOREIGN KEY | `user_id` | `users.user_id` | 존재하는 사용자에 대해서만 채팅방 참여 정보를 저장할 수 있도록 한다. |
 | `uk_chat_room_participants_room_user` | UNIQUE | `chat_room_id`, `user_id` | - | 동일한 사용자가 같은 채팅방에 중복으로 참여자 등록되는 것을 방지한다. 퇴장 후 재입장 여부는 `left_at`을 기준으로 애플리케이션 로직에서 판단한다. |
 
 #### 3-1. 비즈니스 규칙
 
 | 규칙명 | 설명 |
 | --- | --- |
-| `rule_chat_room_join` | 매칭 완료 시 4명의 참여자 정보를 먼저 생성하고, 사용자가 실제 채팅방에 입장하면 `joined_at`을 기록한다. |
+| `rule_chat_room_participant_count` | 채팅방에는 매칭된 참가자 두 명만 선등록한다. |
+| `rule_chat_room_join` | 내부 생성 요청에서 두 명의 참여자를 선등록하고 사용자가 실제 채팅방에 최초 입장하면 `joined_at`을 기록한다. |
 | `rule_chat_room_reentry` | `left_at`이 존재하는 사용자는 해당 채팅방에 다시 입장할 수 없다. |
-| `rule_chat_room_delete` | 채팅방 참여자 4명이 모두 퇴장했거나 자정이 되면 채팅방을 삭제한다. |
+| `rule_chat_room_leave` | 퇴장 시 `left_at`을 기록하고 남은 참가자에게 퇴장 이벤트를 전달한다. 퇴장 후 재입장, 메시지 송신, 실시간 수신 및 과거 메시지 조회는 허용하지 않는다. 퇴장자는 화면에서 기존 메시지 목록을 제거하고 `이미 퇴장한 채팅방입니다.` 안내를 본다. 한 명이라도 퇴장하면 남은 참가자도 메시지를 추가 전송할 수 없다. 메시지 행은 퇴장 즉시 삭제하지 않는다. |
 
 #### 4. 관계
 
 | 관련 테이블 | 연결 컬럼 | 관계 | 관계 설명 |
 | --- | --- | --- | --- |
-| `chat_rooms` | `chat_room_participants.chat_room_id` → `chat_rooms.chat_room_id` | N:1 | 하나의 채팅방에는 매칭이 완료된 4명의 참여자 정보가 생성되며, 각 참여 정보는 하나의 채팅방에 속한다. 채팅방이 삭제되면 해당 참여자 정보도 함께 삭제된다. |
-| `users` | `chat_room_participants.user_id` → `users.user_id` | N:1 | 한 사용자는 서로 다른 여러 채팅방에 참여할 수 있으며, 각 참여 정보는 한 명의 사용자에게 속한다. |
+| `chat_rooms` | `chat_room_participants.chat_room_id` → `chat_rooms.chat_room_id` | N:1 | 하나의 채팅방에는 매칭된 두 참가자 정보가 속한다. 채팅방이 삭제되면 참여자 정보도 함께 삭제된다. |
+| Backend 사용자 | `chat_room_participants.user_id` | 외부 참조 | 사용자 ID는 Backend 인증 확인 API에서 받은 값이며 Chat Server DB 안의 물리 FK는 없다. |
 
 ---
 
@@ -924,8 +926,9 @@ Access Token 재발급에 사용되는 Refresh Token의 유효 상태를 서버�
 | 컬럼명 | 데이터 타입 | 길이 | NULL 여부 | 기본값 | Key | 설명 | 타입/설계 근거 | 기능적 역할 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `chat_message_id` | `BIGINT` | - | NOT NULL | `AUTO_INCREMENT` | PK | 채팅 메시지 고유 ID | 각 메시지를 고유하게 식별하고 메시지가 지속적으로 누적되는 특성을 고려하여 `BIGINT`를 사용한다. | 개별 채팅 메시지를 식별한다. |
-| `chat_room_id` | `BIGINT` | - | NOT NULL | - | FK | 메시지가 전송된 채팅방 ID | `chat_rooms.chat_room_id`를 참조하여 메시지가 어느 채팅방에 속하는지 연결한다. | 특정 채팅방의 메시지 내역을 조회하는 데 사용한다. |
-| `user_id` | `BIGINT` | - | NOT NULL | - | FK | 메시지를 전송한 사용자 ID | `users.user_id`를 참조하여 메시지 작성자를 식별한다. | 메시지를 누가 전송했는지 확인한다. |
+| `chat_room_id` | `BIGINT` | - | NOT NULL | - | FK | 메시지가 전송된 채팅방 ID | 같은 `mulo_chat` DB의 `chat_rooms.chat_room_id`를 참조한다. | 특정 채팅방의 메시지 내역을 조회하는 데 사용한다. |
+| `user_id` | `BIGINT` | - | NOT NULL | - | - | 메시지를 전송한 사용자 ID | Backend 인증 확인 결과의 사용자 ID이며 Chat Server DB에는 Backend 사용자 테이블 FK가 없다. | 메시지를 누가 전송했는지 확인한다. |
+| `client_message_id` | `CHAR(36)` | 36 | NOT NULL | - | - | 클라이언트 메시지 식별자 | UUID 형식이며 현재 V1에 존재한다. | 사용자별 전송 재시도의 멱등성 키로 사용한다. |
 | `content` | `VARCHAR` | 500 | NOT NULL | - | - | 메시지 내용 | 일반 텍스트 채팅 메시지를 저장하며, UI 정책상 메시지 최대 길이를 500자로 제한하므로 `VARCHAR(500)`을 사용한다. | 사용자가 채팅방에서 전송한 실제 메시지 내용을 저장한다. |
 | `created_at` | `DATETIME` | - | NOT NULL | `CURRENT_TIMESTAMP` | - | 메시지 전송 시각 | 메시지가 생성된 시점을 기록한다. | 메시지의 전송 시각을 표시하고 메시지 순서를 조회하는 데 활용한다. |
 
@@ -935,20 +938,23 @@ Access Token 재발급에 사용되는 Refresh Token의 유효 상태를 서버�
 | --- | --- | --- | --- | --- |
 | `pk_chat_messages` | PRIMARY KEY | `chat_message_id` | - | 각 채팅 메시지를 고유하게 식별한다. |
 | `fk_chat_messages_room` | FOREIGN KEY | `chat_room_id` | `chat_rooms.chat_room_id` | 메시지가 실제 존재하는 채팅방에 속하도록 참조 관계를 보장하며, 채팅방 삭제 시 해당 채팅방의 메시지도 함께 삭제되도록 `ON DELETE CASCADE`를 적용한다. |
-| `fk_chat_messages_user` | FOREIGN KEY | `user_id` | `users.user_id` | 메시지의 발신자가 실제 존재하는 사용자인지 보장한다. |
+| `uk_chat_messages_user_client_message` | UNIQUE | `user_id`, `client_message_id` | - | 같은 사용자의 clientMessageId 재전송을 고유하게 식별한다. |
+| `idx_chat_messages_room_created_id` | INDEX | `chat_room_id`, `created_at`, `chat_message_id` | - | 채팅방 메시지를 생성 시각과 메시지 ID의 안정적인 복합 정렬 기준으로 조회한다. |
 
 #### 3-1. 비즈니스 규칙
 
 | 규칙명 | 설명 |
 | --- | --- |
-| `rule_chat_message_sender` | 메시지 전송 시 사용자가 해당 채팅방의 참여자인지 확인하고, `joined_at`이 존재하며 `left_at`이 `NULL`인 경우에만 메시지 전송을 허용한다. |
+| `rule_chat_message_sender` | 매 STOMP SEND마다 인증 사용자와 참가자 ID를 대조하고, 발신자와 상대방 모두 `joined_at` 존재·`left_at IS NULL`이며 방의 `expires_at` 전일 때만 메시지를 허용한다. |
+| `rule_chat_message_expiration` | 메시지 저장 및 조회 전에 만료 여부를 확인한다. 만료 후에는 메시지 전송과 조회를 거절한다. `expires_at` 컬럼은 현재 V1에 없고 향후 V2 migration 대상이다. |
+| `rule_chat_message_history_after_leave` | `left_at`이 있는 참가자의 메시지 조회는 403 `CHAT_ALREADY_LEFT`와 `이미 퇴장한 채팅방입니다.`를 반환한다. 채팅방 참가자가 아닌 사용자는 404 `CHAT_ROOM_NOT_FOUND`다. 퇴장자의 화면에서 기존 메시지 목록을 제거하며 메시지 행은 퇴장 즉시 삭제하지 않는다. |
 
 #### 4. 관계
 
 | 관련 테이블 | 연결 컬럼 | 관계 | 관계 설명 |
 | --- | --- | --- | --- |
 | `chat_rooms` | `chat_messages.chat_room_id` → `chat_rooms.chat_room_id` | N:1 | 하나의 채팅방에는 여러 메시지가 존재할 수 있으며, 각 메시지는 하나의 채팅방에 속한다. |
-| `users` | `chat_messages.user_id` → `users.user_id` | N:1 | 한 사용자는 여러 메시지를 전송할 수 있으며, 각 메시지는 한 명의 발신자에 의해 작성된다. |
+| Backend 사용자 | `chat_messages.user_id` | 외부 참조 | 발신자 ID는 Backend 인증 API의 검증 결과를 사용하며 Chat Server DB 안의 물리 FK는 없다. |
 
 ---
 
@@ -972,7 +978,7 @@ Access Token 재발급에 사용되는 Refresh Token의 유효 상태를 서버�
 `FRIEND_ACCEPTED` | 발생 원인과 알림 클릭 시 처리할 동작을 구분하기 위해 사용한다. | 월별 리포트, AI 플리, 매칭 완료, 친구 요청/수락 알림을 구분한다. |
 | `monthly_report_id` | `BIGINT` | - | NULL | NULL | FK | 생성된 월별 리포트 ID | `MONTHLY_REPORT_CREATED` 알림일 때만 사용하므로 `NULL`을 허용한다. | 알림 클릭 시 해당 월별 리포트와 연결한다. |
 | `recommendation_playlist_id` | `BIGINT` | - | NULL | NULL | FK | 생성된 AI 추천 플레이리스트 ID | `AI_PLAYLIST` 알림일 때만 사용하므로 `NULL`을 허용한다. | 알림 클릭 시 생성된 AI 플레이리스트와 연결한다. |
-| `chat_room_id` | `BIGINT` | - | NULL | NULL | FK | 매칭 완료로 생성된 채팅방 ID | `MATCH_COMPLETED` 알림일 때만 사용하므로 `NULL`을 허용한다. | 알림 클릭 시 매칭된 채팅방으로 이동하는 데 사용한다. |
+| `chat_room_id` | `BIGINT` | - | NULL | NULL | - | 매칭 완료로 생성된 Chat Server 채팅방 ID | `MATCH_COMPLETED` 알림일 때만 사용한다. Chat Server DB를 가리키는 서비스 간 참조이므로 물리 FK를 두지 않는다. | 알림 클릭 시 매칭된 채팅방으로 이동하는 데 사용한다. |
 | `friendship_id` | `BIGINT` | - | NULL | NULL | FK | 친구 관계 ID | `FRIEND_ACCEPTED` 알림에서 사용하며 `friendships.friendship_id`를 참조한다. | 수락 결과 생성된 친구 관계를 식별한다. |
 | `friend_request_id` | `BIGINT` | - | NULL | NULL | FK | 친구 요청 ID | 친구 요청 알림에서 사용하며 `friend_requests.friend_request_id`를 참조한다. | 어떤 친구 요청으로 발생한 알림인지 식별하고, 수락·거절 처리 시 해당 친구 요청을 참조하는 데 사용한다. |
 | `title` | `VARCHAR` | 100 | NOT NULL | - | - | 알림 제목 | 알림 목록에서 주요 내용을 간단히 보여준다. | 사용자에게 알림 종류와 핵심 내용을 표시한다. |
@@ -988,7 +994,6 @@ Access Token 재발급에 사용되는 Refresh Token의 유효 상태를 서버�
 | `fk_notifications_user` | FOREIGN KEY | `user_id` | `users.user_id` | 알림 수신자가 실제 사용자 데이터를 참조하도록 한다. |
 | `fk_notifications_monthly_report` | FOREIGN KEY, UNIQUE | `monthly_report_id` | `monthly_reports.monthly_report_id` | `MONTHLY_REPORT_CREATED` 알림이 실제 생성된 리포트를 참조하도록 하며, 리포트가 삭제되면 알림은 유지하고 `monthly_report_id`만 `NULL`이 되도록 `ON DELETE SET NULL`을 적용한다. |
 | `fk_notifications_playlist` | FOREIGN KEY, UNIQUE | `recommendation_playlist_id` | `recommendation_playlists.recommendation_playlist_id` | `AI_PLAYLIST` 알림이 실제 생성된 플레이리스트를 참조하도록 하며, 플레이리스트가 삭제되면 알림은 유지하고 `recommendation_playlist_id`만 `NULL`이 되도록 `ON DELETE SET NULL`을 적용한다. |
-| `fk_notifications_chat_room` | FOREIGN KEY | `chat_room_id` | `chat_rooms.chat_room_id` | `MATCH_COMPLETED` 알림이 실제 생성된 채팅방을 참조하도록 하며, 채팅방이 삭제되면 알림은 유지하고 `chat_room_id`만 `NULL`이 되도록 `ON DELETE SET NULL`을 적용한다. |
 | `fk_notifications_friendship` | FOREIGN KEY, UNIQUE | `friendship_id` | `friendships.friendship_id` | `FRIEND_ACCEPTED` 알림이 실제로 생성된 친구 관계를 참조하도록 하며, 친구 관계가 삭제되면 알림은 유지하고 `friendship_id`만 `NULL`이 되도록 `ON DELETE SET NULL`을 적용한다. |
 | `chk_notifications_type` | CHECK | `type` | - | 알림 유형을 `MONTHLY_REPORT_CREATED`, `AI_PLAYLIST`, `MATCH_COMPLETED`, `FRIEND_REQUEST`, `FRIEND_ACCEPTED`로 제한한다. |
 | `fk_notifications_friend_request` | FOREIGN KEY, UNIQUE | `friend_request_id` | `friend_requests.friend_request_id` | `FRIEND_REQUEST` 알림이 실제 친구 요청 데이터를 참조하도록 하며, 친구 요청이 삭제되면 알림은 유지하고 `friend_request_id`만 `NULL`이 되도록 `ON DELETE SET NULL`을 적용한다. |
@@ -1007,7 +1012,7 @@ Access Token 재발급에 사용되는 Refresh Token의 유효 상태를 서버�
 | `users` | `notifications.user_id` → `users.user_id` | N:1 | 한 사용자는 여러 알림을 받을 수 있으며 각 알림은 한 명의 수신자에게 전달된다. |
 | `monthly_reports` | `notifications.monthly_report_id` → `monthly_reports.monthly_report_id` | 0..1:1 | 월별 리포트 생성 알림인 경우 해당 리포트와 연결된다. 리포트 삭제 후에는 FK가 `NULL`이 되고 알림 자체는 유지된다. |
 | `recommendation_playlists` | `notifications.recommendation_playlist_id` → `recommendation_playlists.recommendation_playlist_id` | 0..1:1 | AI 플레이리스트 생성 알림인 경우 생성된 플레이리스트와 연결된다. 플레이리스트 삭제 후에는 FK가 `NULL`이 되고 알림 자체는 유지된다. |
-| `chat_rooms` | `notifications.chat_room_id` → `chat_rooms.chat_room_id` | N:0..1 | 매칭 완료 알림인 경우 생성된 채팅방과 연결된다. 채팅방 삭제 후에는 FK가 `NULL`이 되고 알림 자체는 유지된다. |
+| Chat Server 채팅방 | `notifications.chat_room_id` | 외부 참조 | 매칭 완료 알림이 가리키는 Chat Server 채팅방 ID다. 별도 DB이므로 물리 FK는 없다. |
 | `friend_requests` | `notifications.friend_request_id` → `friend_requests.friend_request_id` | 0..1:1 | 하나의 친구 요청에는 하나의 `FRIEND_REQUEST` 알림이 연결될 수 있다. 친구 요청 삭제 후에는 FK가 `NULL`이 되고 알림 자체는 유지된다. |
 | `friendships` | `notifications.friendship_id` → `friendships.friendship_id` | 0..1:1 | 하나의 친구 관계에는 하나의 `FRIEND_ACCEPTED` 알림이 연결될 수 있다. 친구 관계 삭제 후에는 FK가 `NULL`이 되고 알림 자체는 유지된다. |
 ---
