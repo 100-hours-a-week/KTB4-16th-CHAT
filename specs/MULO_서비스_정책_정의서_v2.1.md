@@ -63,7 +63,7 @@
 | `GLB-003` | **현재 설계** | 활성 사용자 기준 | 인증이 필요한 API는 원칙적으로 인증된 활성 사용자를 대상으로 한다. 탈퇴 사용자는 정상 인증 사용자로 취급하지 않는다. | API 명세 상세2차 AUTH/USER 전반 |
 | `GLB-004` | **현재 설계** | 리소스 존재 여부 은닉 | 소유권 또는 접근권한이 없는 일부 개인 리소스는 존재 여부가 노출되지 않도록 미존재와 동일한 404로 처리한다. | API 명세 상세2차 record/friend/match/chat/notification |
 | `GLB-005` | **현재 구현** | 국내 서비스 범위와 법정동 미확인 | MULO V1은 대한민국 국내에서만 자물쇠 생성을 지원한다. 신규 장소 생성에서 Kakao 법정동(B) 코드·이름을 찾지 못하면 400 `UNSUPPORTED_RECORD_LOCATION`으로 자물쇠 생성을 중단한다. 기존에 저장된 NULL 법정동 데이터의 조회 fallback은 유지한다. | `KakaoRegionClient:38-75`, `GlobalExceptionHandler`, `PLACE-005` |
-| `GLB-006` | **확정** | 서비스 기준 시간대 | `오늘`, 투표 일자, 23:00 매칭 종료, 00:00 채팅방 삭제, 월말 판단 등 모든 비즈니스 날짜·시간은 `Asia/Seoul`(KST, UTC+09:00) 기준으로 계산한다. DB의 물리적 저장 timezone과는 별개의 서비스 규칙이다. | 사용자 확정 |
+| `GLB-006` | **확정** | 서비스 기준 시간대 | `오늘`, 투표 일자, 23:00 매칭 종료, 채팅방 만료, 월말 판단 등 모든 비즈니스 날짜·시간은 `Asia/Seoul`(KST, UTC+09:00) 기준으로 계산한다. DB의 물리적 저장 timezone과는 별개의 서비스 규칙이다. | 사용자 확정 |
 
 ## 회원·인증
 
@@ -275,7 +275,7 @@
 
 | 정책 ID | 상태 | 정책명 | 현재 규칙 | 근거 |
 |---|---|---|---|---|
-| `MATCH-001` | **확정** | 매칭 구성 | 동일 `vote_question_id`에서 A 선택 사용자 2명 + B 선택 사용자 2명이 모이면 4인 채팅방을 생성한다. | API 명세 상세2차 정책 요약 R23 / 테이블 정의서 §18-19 |
+| `MATCH-001` | **확정** | 매칭 구성 | 매칭 성사 결과인 사용자 2명을 한 쌍으로 Chat Server에 전달하고, 두 사용자만 참여하는 1:1 채팅방을 생성한다. 매칭 후보 선택 알고리즘은 이 문서에서 변경하지 않는다. | MULO V2 Chat Server 확정 정책 |
 | `MATCH-002` | **확정** | 매칭 운영 종료 | 당일 23:00 이후에는 신규 매칭 요청을 생성하지 않는다. | 사용자 확정 / API 명세 상세2차 R238,R246 |
 | `MATCH-003` | **확정** | 23시 대기 요청 만료 | 당일 23:00 시점에 남아 있는 모든 WAITING 요청을 EXPIRED로 변경하고 이후 추가 매칭하지 않는다. | 사용자 확정 / API 명세 상세2차 정책 요약 R23 |
 | `MATCH-004` | **현재 설계** | 매칭 요청 기준 답변 | 매칭 요청은 현재 사용자가 소유한 오늘 날짜의 유효한 투표 답변을 기준으로 한다. | API 명세 상세2차 R238-R246 |
@@ -285,26 +285,52 @@
 | `MATCH-008` | **현재 설계** | 상태 집합 | 매칭 상태는 WAITING/MATCHED/EXPIRED 세 가지다. | 테이블 정의서 §18 / API 명세 상세2차 R247 |
 | `MATCH-009` | **현재 설계** | 매칭 상태 조회 | 프론트는 polling으로 상태를 조회하며 MATCHED이면 `chatRoomId`, WAITING/EXPIRED이면 NULL을 반환한다. | API 명세 상세2차 R247-R253 |
 | `MATCH-010` | **현재 설계** | 상태 조회 소유권 | 매칭 요청 소유자만 상태를 조회할 수 있고 미존재/타인 소유는 동일한 404다. | API 명세 상세2차 R247,R251,R253 |
-| `MATCH-011` | **현재 설계** | 채팅방 삭제 연계 | 채팅방 삭제 시 해당 방을 참조하는 MATCHED `match_requests`는 FK 정책상 CASCADE 삭제된다. | 테이블 정의서 6차 §18 |
+| `MATCH-011` | **확정** | 매칭과 Chat Server 경계 | Backend의 `match_requests.chat_room_id`는 Chat Server가 반환한 식별자를 보관하는 논리 참조다. 별도 DB 경계이므로 Chat Server 방에 대한 물리 FK나 cascade 삭제를 두지 않는다. | MULO V2 Chat Server 확정 정책 |
 | `MATCH-012` | **확정** | 매칭 후보 FIFO | 동일 질문에서 매칭 가능한 WAITING 사용자가 필요한 인원보다 많으면 먼저 생성된 매칭 요청부터 선택하는 FIFO 방식을 사용한다. 구현 정렬 기준은 `created_at ASC`, 동일 시각이면 `match_request_id ASC`로 결정성을 확보한다. | 사용자 확정 |
 
 ## 채팅
 
 | 정책 ID | 상태 | 정책명 | 현재 규칙 | 근거 |
 |---|---|---|---|---|
-| `CHAT-001` | **현재 설계** | 채팅방 수명 | 채팅방은 생성 당일에만 유지하며 자정 또는 참여자 4명 모두 퇴장 시 물리 삭제한다. | 테이블 정의서 6차 §19-20 / API 명세 상세2차 R279-R285 |
-| `CHAT-002` | **확정** | 방 단일 선택지 제거 | A2+B2 방이므로 `chat_rooms.selected_option`을 두지 않고 각 참여자의 선택은 `vote_answers.selected_option`에서 판별한다. | 테이블 정의서 6차 §19 / 최근 정책 동기화 |
-| `CHAT-003` | **현재 설계** | 참가자 선등록 | 매칭 완료 시 4명의 `chat_room_participants`를 먼저 생성한다. | 테이블 정의서 6차 §20 |
-| `CHAT-004` | **현재 설계** | 최초 입장 | 실제 최초 채팅방 입장 시 `joined_at`을 기록한다. | API 명세 상세2차 R256-R262 |
-| `CHAT-005` | **현재 설계** | 재입장 금지 | `left_at`이 존재하는 사용자는 해당 채팅방에 다시 입장할 수 없고 403 `CHAT_REENTRY_FORBIDDEN`이다. | API 명세 상세2차 R259,R262 |
-| `CHAT-006` | **현재 설계** | 참가자 접근 은닉 | 삭제된 방 또는 비참가자의 접근은 동일한 404 `CHAT_ROOM_NOT_FOUND`로 처리한다. | API 명세 상세2차 R262,R268,R278,R285 |
-| `CHAT-007` | **현재 설계** | 채팅방 정보 노출 | 채팅방 정보 조회는 참가자에게 참여자의 `userId`, `nickname`을 반환한다. | API 명세 상세2차 R263-R268 |
-| `CHAT-008` | **현재 설계** | 메시지 발신 권한 | `joined_at`이 존재하고 `left_at`이 NULL인 현재 참가자만 메시지를 보낼 수 있다. | 테이블 정의서 6차 §21 |
-| `CHAT-009` | **현재 설계** | 메시지 길이 | 텍스트 채팅 메시지 최대 길이는 500자이다. | 테이블 정의서 6차 §21 |
-| `CHAT-010` | **확정** | 메시지 내역 페이지 | 메시지 내역은 Cursor 기반, 기본 30·최대 100이며 API 반환 순서는 최신→과거다. 전체 목록 기본값 20 정책의 명시적 예외다. | 사용자 확정 2026-09-21 / API 명세 상세2차 R269-R278 |
-| `CHAT-011` | **현재 설계** | 방 삭제와 메시지 | 채팅방 물리 삭제 시 참여자와 메시지는 CASCADE 삭제되며 메시지 이력도 조회할 수 없다. | 테이블 정의서 6차 §20-21 / API 명세 상세2차 R278 |
-| `CHAT-012` | **현재 설계** | 퇴장 처리 | 퇴장 시 `left_at`을 기록하고 남은 참가자에게 퇴장 사실을 전달하며 이미 퇴장한 사용자의 반복 퇴장은 409다. | API 명세 상세2차 R279-R285 |
-| `CHAT-013` | **보류** | WebSocket 상세 | WebSocket Access Token 전달 방식과 실시간 메시지 상세 명세는 후속 설계로 보류한다. | API 명세 상세2차 정책 요약 R28 |
+| `CHAT-001` | **확정** | 1:1 채팅방 | 하나의 채팅방에는 매칭된 사용자 정확히 2명이 참여한다. 채팅은 WebSocket + STOMP를 사용하며 메시지는 MySQL에 저장한다. | MULO V2 Chat Server 확정 정책 |
+| `CHAT-002` | **확정** | 채팅방 식별 및 생성 | Backend가 매칭 성사 결과의 `matchId`, 두 참가자, `expiresAt`을 내부 채팅방 생성 API로 전달한다. `matchId`당 채팅방은 하나다. | MULO V2 Chat Server 확정 정책 |
+| `CHAT-003` | **확정** | 채팅방 만료 시각 계산 | Backend가 매칭 성사 날짜의 다음 날 00:00:00 `Asia/Seoul`을 `expiresAt`으로 계산해 전달한다. 생성 시각을 만료 기준으로 사용하지 않는다. | MULO V2 Chat Server 확정 정책 |
+| `CHAT-004` | **확정** | 만료 처리 | Chat Server는 전달된 `expiresAt`을 저장하고 방 입장, 메시지 전송, 메시지 조회마다 만료를 확인한다. 만료 후 메시지 송수신 및 조회를 허용하지 않는다. 만료된 방 행의 물리 삭제 시점은 별도 정책이므로 이 문서에서 정하지 않는다. | MULO V2 Chat Server 확정 정책 |
+| `CHAT-005` | **확정** | 만료 매칭 신규 생성 | 이미 만료된 매칭의 신규 채팅방 생성 요청은 409 `CHAT_ROOM_EXPIRED`로 거절한다. | MULO V2 Chat Server 확정 정책 |
+| `CHAT-006` | **확정** | 내부 생성 멱등성 | 기존 `matchId`의 참가자 2명과 `expiresAt`이 모두 같은 재요청은 기존 `chatRoomId`를 반환한다. 하나라도 다르면 409 `CHAT_ROOM_CONFLICT`다. 이 멱등 재요청은 만료 매칭에 대한 신규 생성 요청과 구분한다. | MULO V2 Chat Server 확정 정책 |
+| `CHAT-007` | **확정** | 입장과 재연결 | 매칭된 참가자만 입장할 수 있다. 최초 입장에 `joined_at`을 기록하고, 이미 입장한 미퇴장 사용자의 재연결은 중복 입장으로 처리하지 않는다. `left_at`이 기록된 사용자는 재입장할 수 없다. | MULO V2 Chat Server 확정 정책 |
+| `CHAT-008` | **확정** | 채팅방 정보 조회 | 채팅방 상세 조회는 입장 완료(`joined_at` 존재) 및 미퇴장(`left_at IS NULL`) 참가자만 허용한다. | MULO V2 Chat Server 확정 정책 |
+| `CHAT-009` | **확정** | 메시지 전송 권한 | 발신자는 인증된 Principal의 사용자 ID를 사용한다. 발신자와 상대방 모두 입장 완료·미퇴장 상태이고 채팅방이 만료 전일 때만 전송할 수 있다. 권한은 매 STOMP SEND마다 확인한다. 요청 본문의 사용자 ID는 신뢰하지 않는다. | MULO V2 Chat Server 확정 정책 |
+| `CHAT-010` | **확정** | 메시지 길이 | 텍스트 메시지는 최대 500자다. 초과 메시지는 STOMP 애플리케이션 오류로 거절한다. | MULO V2 Chat Server 확정 정책 |
+| `CHAT-011` | **확정** | 메시지 저장 및 전달 순서 | 메시지를 MySQL 트랜잭션으로 저장하고 DB COMMIT 성공 이후에만 실시간 전달한다. Redis Pub/Sub은 V2에서 사용하지 않는다. | MULO V2 Chat Server 확정 정책 |
+| `CHAT-012` | **확정** | 메시지 전송 멱등성 | 클라이언트는 UUID `clientMessageId`를 보낸다. 같은 사용자·ID·방·내용 재전송은 기존 결과를 발신자에게만 재전송하며 DB에 중복 저장하거나 상대방에게 다시 전달하지 않는다. 같은 ID에 방 또는 내용이 다르면 충돌이다. ID가 다르면 내용이 같아도 신규 메시지다. UNIQUE(`user_id`, `client_message_id`)를 유지한다. | MULO V2 Chat Server 확정 정책 |
+| `CHAT-013` | **확정** | 실시간 전달 | 메시지와 퇴장 이벤트는 사용자별 STOMP destination으로 전달하며 서버가 각 수신자의 권한을 확인한다. 세부 destination 및 payload는 `MULO_Chat_STOMP_v2.0.md`를 기준으로 한다. | MULO V2 Chat Server 확정 정책 |
+| `CHAT-014` | **확정** | 퇴장 | 퇴장 시 `left_at`을 기록하고 상대방에게 퇴장 이벤트를 보낸다. 퇴장 후 재입장, 메시지 전송, 실시간 메시지 수신, 과거 메시지 조회를 허용하지 않는다. 퇴장 요청자는 채팅 화면에서 기존 메시지 목록을 지우고 `이미 퇴장한 채팅방입니다.` 안내를 표시한다. 메시지 행은 퇴장 즉시 삭제하지 않는다. 한 명이라도 퇴장하면 남은 참가자도 메시지를 추가 전송할 수 없다. | MULO V2 Chat Server 확정 정책 |
+| `CHAT-015` | **확정** | 퇴장자 메시지 이력 접근 | `left_at`이 설정된 참가자의 메시지 조회 요청은 403 `CHAT_ALREADY_LEFT`와 `이미 퇴장한 채팅방입니다.`를 반환한다. 채팅방 참가자가 아닌 사용자는 기존대로 404 `CHAT_ROOM_NOT_FOUND`다. | MULO V2 Chat Server 확정 정책 |
+| `CHAT-016` | **확정** | 메시지 커서 페이징 | HTTP 메시지 조회는 20개 단위 커서 페이징이다. 정렬 키는 `created_at` 오름차순과 `chat_message_id` 오름차순을 함께 사용한다. 최초 페이지는 최신 20개를 선택한 뒤 화면에 오래된 순으로 반환한다. 다음 페이지는 더 오래된 메시지다. 응답은 `nextCursor`, `hasNext`를 포함한다. | MULO V2 Chat Server 확정 정책 |
+| `CHAT-017` | **확정** | 사용자 인증 | Chat Server는 전용 로그인을 제공하지 않는다. Backend Access Token을 HTTP Bearer 및 STOMP CONNECT에 사용하고, Backend의 내부 인증 확인 API로 검증한다. Chat Server는 JWT 서명 Secret을 공유하지 않으며 Refresh Token은 Backend만 관리한다. | MULO V2 Chat Server 확정 정책 |
+| `CHAT-018` | **확정** | STOMP 연결 인증 및 만료 | Handshake는 허용된 Origin만 받고 인증 완료로 취급하지 않는다. CONNECT와 매 재연결마다 Access Token을 검증하고 검증된 사용자 ID를 Principal에 둔다. 토큰 만료 시 연결을 종료한다. 다른 기기 로그아웃의 즉시 연결 종료는 V2 범위가 아니다. | MULO V2 Chat Server 확정 정책 |
+| `CHAT-019` | **확정** | 서버 간 인증 | Backend↔Chat Server 내부 API는 사용자 JWT와 별도의 `X-Internal-Api-Key`로 인증한다. Key는 환경변수 또는 Secret Manager에서 주입하고 내부 네트워크 접근도 제한한다. | MULO V2 Chat Server 확정 정책 |
+| `CHAT-020` | **확정** | HTTP와 STOMP 오류 | HTTP는 400/401/403/404/409 응답 계약을 사용한다. STOMP 연결 거부 및 메시지 오류는 애플리케이션 오류 코드로 표현하며 HTTP 상태 코드나 별도 ACK destination을 사용하지 않는다. | MULO V2 Chat Server 확정 정책 |
+
+### Chat Server와 Backend API 소유권
+
+| 소유자 | API/연동 | 책임 |
+|---|---|---|
+| Chat Server | 사용자 채팅방 입장·상세·메시지 조회·퇴장 HTTP API, STOMP 메시지 | 채팅 권한 및 만료 확인, 메시지 MySQL 저장과 실시간 전달 |
+| Chat Server | `POST /internal/chat-rooms`, `GET /internal/chat-rooms/by-match/{matchId}` | Backend 요청에 따른 채팅방 멱등 생성 및 조회 |
+| Backend | `POST /internal/auth/verify` | Backend Access Token 서명·만료·`tokenType=access`·사용자 활성 상태 확인 |
+
+Backend 소유의 `/internal/auth/verify`는 외부 연동 계약이며 Chat Server가 구현하거나 소유하지 않는다. API Key는 각 내부 API 요청에 `X-Internal-Api-Key` 헤더로 전달한다.
+
+### HTTP 사용자 API 인가 요약
+
+- 모든 사용자 HTTP API는 `Authorization: Bearer <access-token>`을 사용한다. Chat Server는 Backend 내부 인증 확인 API를 공통 인증 경로로 호출한다.
+- 입장은 매칭된 두 참가자만 가능하다. 이미 입장한 미퇴장 사용자의 재요청은 중복 입장을 만들지 않는다. 퇴장자는 재입장할 수 없다.
+- 채팅방 상세는 입장 완료 및 미퇴장 참가자에게만 허용한다.
+- 메시지 전송은 발신자와 상대방 모두 입장 완료·미퇴장이고 방이 만료 전일 때 허용한다.
+- 만료된 방의 입장·메시지 전송·메시지 조회는 거부한다. 사용자 HTTP 요청의 만료 응답은 403 `CHAT_ROOM_EXPIRED`로 계약한다.
+- `left_at`이 설정된 참가자의 메시지 조회는 403 `CHAT_ALREADY_LEFT`로 거부한다. 프론트엔드는 기존 메시지 목록을 제거하고 `이미 퇴장한 채팅방입니다.` 안내 화면을 표시한다. 참가자가 아닌 사용자는 404 `CHAT_ROOM_NOT_FOUND`를 받는다. 메시지는 퇴장 즉시 DB에서 삭제하지 않는다.
 
 ## 알림
 
@@ -326,8 +352,8 @@
 
 | 정책 ID | 상태 | 정책명 | 현재 규칙 | 근거 |
 |---|---|---|---|---|
-| `LIST-001` | **확정** | 기본 페이지 크기 | 커서 기반 목록 API의 `size` 기본값은 20이며, 채팅 메시지 내역만 기본 30을 유지한다. | 사용자 확정 2026-09-21 / 팀원 OpenAPI v2.4 |
-| `LIST-002` | **확정** | 최대 페이지 크기 | 모든 커서 기반 목록 API의 `size` 범위는 최소 1, 최대 100으로 통일한다. | 사용자 확정 2026-09-21 / OpenAPI v2.6 |
+| `LIST-001` | **확정** | 기본 페이지 크기 | 채팅 메시지 내역은 20개 단위 커서 페이지로 조회한다. 다른 커서 기반 API의 기본값은 해당 API 정의를 따른다. | MULO V2 Chat Server 확정 정책 |
+| `LIST-002` | **확정** | 최대 페이지 크기 | 일반 커서 기반 목록 API의 `size` 범위는 최소 1, 최대 100이다. Chat Server 메시지 내역은 페이지당 20개로 고정한다. | 사용자 확정 / MULO V2 Chat Server 확정 정책 |
 | `LIST-003` | **현재 설계** | 빈 목록 | 정상 조회 대상이 없을 경우 목록 API는 200과 빈 배열을 반환하는 방향으로 설계되어 있다. | API 명세 상세2차 places/friends/report/chat/notification |
 
 ## 보류·V1 제외
@@ -362,7 +388,7 @@
 | ID | 대상 | 수정 필요 내용 |
 |---|---|---|
 | `SYNC-001` | `places.legal_dong_code/name` | 기존/예외 데이터를 위한 NULL 허용 및 법정동 쌍 CHECK 제약을 유지한다. 신규 Place 생성은 서버 Kakao의 유효한 B code/name 확인이 필수이며 DB migration 없이 애플리케이션에서 보장한다. |
-| `SYNC-002` | `chat_rooms.selected_option` | A2+B2 정책에 따라 `chat_rooms.selected_option`을 제거한다. 선택 정보는 `vote_answers.selected_option`으로 판별한다. |
+| `SYNC-002` | Chat Server 채팅 정책 | 1:1 채팅, 매칭 성사일 기반 expiresAt, 인증 연동, STOMP·멱등성·20개 메시지 페이징 정책을 서비스/테이블/OpenAPI/STOMP 명세에 동기화한다. 실제 스키마 변경은 V2 migration으로 반영한다. |
 | `SYNC-003` | `record_drafts` | 정책상 V1 제외지만 Flyway V1에 실제 테이블이 존재한다. 기능에서 사용하지 않으며 삭제 여부는 별도 migration 결정으로 남긴다. |
 | `SYNC-004` | 취향 투표 API | `music_genre=NULL` 사용자의 오늘 질문 조회/투표 제출을 `403 MUSIC_GENRE_REQUIRED`로 통일한다. |
 | `SYNC-005` | AI 오류 코드 | 기존 `AI_API_ERROR` 표기는 `AI_SERVICE_ERROR`로 통일한다. 최소 기억 검색 API와 AI 추천 API 문구를 함께 점검한다. |
