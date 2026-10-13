@@ -1,0 +1,22 @@
+services:
+  mysql:
+    image: mysql:8.4
+    container_name: mulo-chat-mysql
+    environment:
+      MYSQL_DATABASE: mulo_chat
+      MYSQL_USER: ${CHAT_DB_USERNAME}
+      MYSQL_PASSWORD: ${CHAT_DB_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${CHAT_MYSQL_ROOT_PASSWORD}
+    ports:
+      - "127.0.0.1:3308:3306"
+    volumes:
+      - mulo-chat-mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+
+volumes:
+  mulo-chat-mysql-data:
