@@ -11,5 +11,13 @@ spring:
   flyway:
     enabled: true
 
+chat:
+  auth:
+    backend:
+      url: ${CHAT_BACKEND_URL:}
+      internal-api-key: ${CHAT_INTERNAL_API_KEY:}
+      connect-timeout: ${CHAT_AUTH_CONNECT_TIMEOUT:2s}
+      response-timeout: ${CHAT_AUTH_RESPONSE_TIMEOUT:3s}
+
 server:
   port: 8081
