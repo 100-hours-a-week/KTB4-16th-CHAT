@@ -16,7 +16,8 @@ import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest(properties = {
         "chat.auth.backend.url=http://backend.test",
-        "chat.auth.backend.internal-api-key=test-internal-key"
+        "chat.auth.backend.internal-api-key=test-internal-key",
+        "chat.websocket.allowed-origins=http://localhost"
 })
 @AutoConfigureMockMvc
 class HttpSecurityConfigurationTest {
@@ -53,10 +54,16 @@ class HttpSecurityConfigurationTest {
     }
 
     @Test
-    void doesNotOpenWebSocketHandshakeBeforeStompAuthenticationExists() throws Exception {
+    void permitsOnlyTheWebSocketHandshakePathForStompAuthentication() throws Exception {
         mockMvc.perform(get("/ws")
                         .header("Upgrade", "websocket")
                 .header("Connection", "Upgrade"))
+                .andExpect(result -> org.junit.jupiter.api.Assertions.assertNotEquals(
+                        401, result.getResponse().getStatus()
+                ));
+        mockMvc.perform(get("/other")
+                        .header("Upgrade", "websocket")
+                        .header("Connection", "Upgrade"))
                 .andExpect(status().isUnauthorized());
         verifyNoInteractions(tokenVerifier);
     }

@@ -12,6 +12,8 @@ spring:
     enabled: true
 
 chat:
+  websocket:
+    allowed-origins: ${CHAT_WS_ALLOWED_ORIGINS:}
   auth:
     backend:
       url: ${CHAT_BACKEND_URL:}

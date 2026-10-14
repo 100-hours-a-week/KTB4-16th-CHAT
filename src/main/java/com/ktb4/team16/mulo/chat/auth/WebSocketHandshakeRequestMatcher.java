@@ -12,7 +12,9 @@ public class WebSocketHandshakeRequestMatcher implements RequestMatcher {
 
     @Override
     public boolean matches(HttpServletRequest request) {
+        String expectedPath = request.getContextPath() + "/ws";
         return "GET".equalsIgnoreCase(request.getMethod())
+                && expectedPath.equals(request.getRequestURI())
                 && "websocket".equalsIgnoreCase(request.getHeader("Upgrade"))
                 && containsUpgradeToken(request.getHeaders("Connection"));
     }
