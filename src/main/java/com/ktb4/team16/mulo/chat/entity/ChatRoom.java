@@ -1,5 +1,6 @@
 package com.ktb4.team16.mulo.chat.entity;
 
+import com.ktb4.team16.mulo.chat.ChatTime;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -9,14 +10,11 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
-import java.time.ZoneId;
 import java.util.Objects;
 
 @Entity
 @Table(name = "chat_rooms")
 public class ChatRoom {
-
-    private static final ZoneId CHAT_TIME_ZONE = ZoneId.of("Asia/Seoul");
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -38,7 +36,7 @@ public class ChatRoom {
     private ChatRoom(Long matchId, OffsetDateTime expiresAt) {
         this.matchId = matchId;
         this.expiresAt = Objects.requireNonNull(expiresAt)
-                .atZoneSameInstant(CHAT_TIME_ZONE)
+                .atZoneSameInstant(ChatTime.KST)
                 .toLocalDateTime();
     }
 
@@ -49,7 +47,7 @@ public class ChatRoom {
     @PrePersist
     private void setCreatedAt() {
         if (createdAt == null) {
-            createdAt = LocalDateTime.now();
+            createdAt = ChatTime.now();
         }
     }
 

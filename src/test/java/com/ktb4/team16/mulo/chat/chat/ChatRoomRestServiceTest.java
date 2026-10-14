@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -17,6 +18,8 @@ import com.ktb4.team16.mulo.chat.exception.ChatApiException;
 import com.ktb4.team16.mulo.chat.repository.ChatMessageRepository;
 import com.ktb4.team16.mulo.chat.repository.ChatRoomParticipantRepository;
 import com.ktb4.team16.mulo.chat.repository.ChatRoomRepository;
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Base64;
@@ -38,13 +41,17 @@ class ChatRoomRestServiceTest {
     private ChatRoomParticipantRepository participantRepository;
     private ChatMessageRepository messageRepository;
     private ChatRoomRestService service;
+    private ChatMessageCursorCodec cursorCodec;
+
+    private static final Clock TEST_CLOCK = Clock.fixed(Instant.parse("2026-10-14T14:59:59Z"), ZoneOffset.UTC);
 
     @BeforeEach
     void setUp() {
         chatRoomRepository = mock(ChatRoomRepository.class);
         participantRepository = mock(ChatRoomParticipantRepository.class);
         messageRepository = mock(ChatMessageRepository.class);
-        service = new ChatRoomRestService(chatRoomRepository, participantRepository, messageRepository);
+        cursorCodec = new ChatMessageCursorCodec();
+        service = service(TEST_CLOCK);
     }
 
     @Test
@@ -142,6 +149,46 @@ class ChatRoomRestServiceTest {
     }
 
     @Test
+    void paginatesWithTwentyItemsAndExclusiveTimestampIdCursor() {
+        LocalDateTime timestamp = LocalDateTime.of(2026, 10, 13, 15, 30);
+        ChatRoomParticipant user = participant(LocalDateTime.now(), null);
+        when(user.getUserId()).thenReturn(USER_ID);
+        when(user.getNickname()).thenReturn("jettie");
+        arrangeRoomAndParticipant(activeRoom(), user);
+        when(participantRepository.findAllByChatRoomChatRoomId(CHAT_ROOM_ID)).thenReturn(List.of(user));
+
+        List<ChatMessage> firstPageNewestFirst = descendingMessages(120, 101, timestamp);
+        List<ChatMessage> secondPageNewestFirst = descendingMessages(100, 81, timestamp);
+        when(messageRepository.findHistory(eq(CHAT_ROOM_ID), isNull(), isNull(), any(Pageable.class)))
+                .thenReturn(new SliceImpl<>(firstPageNewestFirst, Pageable.ofSize(20), true));
+        when(messageRepository.findHistory(eq(CHAT_ROOM_ID), eq(timestamp), eq(101L), any(Pageable.class)))
+                .thenReturn(new SliceImpl<>(secondPageNewestFirst, Pageable.ofSize(20), false));
+
+        ChatMessageHistoryResponse first = service.getHistory(CHAT_ROOM_ID, USER_ID, null);
+        ChatMessageCursorCodec.Cursor nextCursor = cursorCodec.decode(first.nextCursor());
+        ChatMessageHistoryResponse second = service.getHistory(CHAT_ROOM_ID, USER_ID, first.nextCursor());
+
+        assertThat(first.messages()).hasSize(20)
+                .extracting(ChatMessageHistoryResponse.Message::chatMessageId)
+                .containsExactlyElementsOf(idsAscending(101, 120));
+        assertThat(nextCursor).isEqualTo(new ChatMessageCursorCodec.Cursor(timestamp, 101L));
+        assertThat(second.messages()).hasSize(20)
+                .extracting(ChatMessageHistoryResponse.Message::chatMessageId)
+                .containsExactlyElementsOf(idsAscending(81, 100));
+        assertThat(first.messages()).extracting(ChatMessageHistoryResponse.Message::chatMessageId)
+                .doesNotContainAnyElementsOf(second.messages().stream()
+                        .map(ChatMessageHistoryResponse.Message::chatMessageId).toList());
+        assertThat(java.util.stream.Stream.concat(
+                second.messages().stream().map(ChatMessageHistoryResponse.Message::chatMessageId),
+                first.messages().stream().map(ChatMessageHistoryResponse.Message::chatMessageId))
+        .toList()).containsExactlyElementsOf(idsAscending(81, 120));
+        verify(messageRepository).findHistory(eq(CHAT_ROOM_ID), isNull(), isNull(),
+                org.mockito.ArgumentMatchers.argThat(pageable -> pageable.getPageSize() == 20));
+        verify(messageRepository).findHistory(eq(CHAT_ROOM_ID), eq(timestamp), eq(101L),
+                org.mockito.ArgumentMatchers.argThat(pageable -> pageable.getPageSize() == 20));
+    }
+
+    @Test
     void rejectsInvalidCursorAndHistoryAccessByFormerOrNotYetJoinedParticipant() {
         arrangeRoomAndParticipant(activeRoom(), participant(LocalDateTime.now(), null));
         assertCode(HttpStatus.BAD_REQUEST, "INVALID_CURSOR", () -> service.getHistory(CHAT_ROOM_ID, USER_ID, "invalid"));
@@ -167,6 +214,24 @@ class ChatRoomRestServiceTest {
     }
 
     @Test
+    void expiresRoomAtKstMidnight() {
+        ChatRoom room = mock(ChatRoom.class);
+        when(room.getExpiresAt()).thenReturn(LocalDateTime.parse("2026-10-15T00:00:00"));
+        ChatRoomParticipant participant = participant(LocalDateTime.parse("2026-10-14T12:00:00"), null);
+        arrangeRoomAndParticipant(room, participant);
+        when(participantRepository.findAllByChatRoomChatRoomId(CHAT_ROOM_ID)).thenReturn(List.of());
+
+        ChatRoomRestService oneSecondBefore = service(TEST_CLOCK);
+        oneSecondBefore.getDetail(CHAT_ROOM_ID, USER_ID);
+
+        ChatRoomRestService atMidnight = service(Clock.fixed(Instant.parse("2026-10-14T15:00:00Z"), ZoneOffset.UTC));
+        assertCode(HttpStatus.FORBIDDEN, "CHAT_ROOM_EXPIRED", () -> atMidnight.getDetail(CHAT_ROOM_ID, USER_ID));
+
+        ChatRoomRestService oneSecondAfter = service(Clock.fixed(Instant.parse("2026-10-14T15:00:01Z"), ZoneOffset.UTC));
+        assertCode(HttpStatus.FORBIDDEN, "CHAT_ROOM_EXPIRED", () -> oneSecondAfter.getDetail(CHAT_ROOM_ID, USER_ID));
+    }
+
+    @Test
     void serializesMessageCreatedAtWithKstOffset() throws Exception {
         ChatMessageHistoryResponse response = new ChatMessageHistoryResponse(
                 List.of(new ChatMessageHistoryResponse.Message(
@@ -187,6 +252,11 @@ class ChatRoomRestServiceTest {
                 .thenReturn(Optional.of(participant));
         when(participantRepository.findByChatRoomChatRoomIdAndUserIdForUpdate(CHAT_ROOM_ID, USER_ID))
                 .thenReturn(Optional.of(participant));
+    }
+
+    private ChatRoomRestService service(Clock clock) {
+        ChatRoomAccessService accessService = new ChatRoomAccessService(chatRoomRepository, participantRepository, clock);
+        return new ChatRoomRestService(accessService, participantRepository, messageRepository, cursorCodec);
     }
 
     private ChatRoom activeRoom() {
@@ -216,6 +286,16 @@ class ChatRoomRestServiceTest {
         when(message.getClientMessageId()).thenReturn("550e8400-e29b-41d4-a716-446655440000");
         when(message.getContent()).thenReturn(content);
         return message;
+    }
+
+    private List<ChatMessage> descendingMessages(int highestId, int lowestId, LocalDateTime timestamp) {
+        return java.util.stream.IntStream.iterate(highestId, id -> id >= lowestId, id -> id - 1)
+                .mapToObj(id -> message((long) id, timestamp, USER_ID, "message-" + id))
+                .toList();
+    }
+
+    private List<Long> idsAscending(int lowestId, int highestId) {
+        return java.util.stream.LongStream.rangeClosed(lowestId, highestId).boxed().toList();
     }
 
     private void assertCode(HttpStatus status, String code, org.junit.jupiter.api.function.Executable action) {

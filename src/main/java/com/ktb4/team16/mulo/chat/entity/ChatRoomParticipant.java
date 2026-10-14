@@ -1,5 +1,6 @@
 package com.ktb4.team16.mulo.chat.entity;
 
+import com.ktb4.team16.mulo.chat.ChatTime;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -63,12 +64,12 @@ public class ChatRoomParticipant {
 
     public void enter() {
         if (joinedAt == null) {
-            joinedAt = LocalDateTime.now();
+            joinedAt = ChatTime.now();
         }
     }
 
     public void leave() {
-        leftAt = LocalDateTime.now();
+        leftAt = ChatTime.now();
     }
 
     public Long getChatRoomParticipantId() {
