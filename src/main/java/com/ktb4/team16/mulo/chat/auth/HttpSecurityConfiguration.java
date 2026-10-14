@@ -32,6 +32,7 @@ public class HttpSecurityConfiguration {
                         .accessDeniedHandler(errorHandler)
                 )
                 .authorizeHttpRequests(authorize -> authorize
+                        .requestMatchers(webSocketHandshakeMatcher).permitAll()
                         .requestMatchers("/api/chat-rooms", "/api/chat-rooms/**").hasRole("CHAT_USER")
                         .requestMatchers("/internal", "/internal/**").hasRole("INTERNAL_SERVICE")
                         .anyRequest().denyAll()
