@@ -1,5 +1,6 @@
 package com.ktb4.team16.mulo.chat.entity;
 
+import com.ktb4.team16.mulo.chat.ChatTime;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -69,7 +70,7 @@ public class ChatMessage {
     @PrePersist
     private void setCreatedAt() {
         if (createdAt == null) {
-            createdAt = LocalDateTime.now();
+            createdAt = ChatTime.now();
         }
     }
 

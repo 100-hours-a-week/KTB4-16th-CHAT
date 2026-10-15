@@ -2,6 +2,7 @@ package com.ktb4.team16.mulo.chat.entity;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.ktb4.team16.mulo.chat.ChatTime;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,8 @@ class ChatRoomParticipantTest {
         participant.enter();
 
         assertThat(participant.getJoinedAt()).isEqualTo(joinedAt);
+        assertThat(joinedAt).isBetween(LocalDateTime.now(ChatTime.KST).minusSeconds(2),
+                LocalDateTime.now(ChatTime.KST).plusSeconds(2));
     }
 
     @Test
@@ -28,5 +31,7 @@ class ChatRoomParticipantTest {
         participant.leave();
 
         assertThat(participant.getLeftAt()).isNotNull();
+        assertThat(participant.getLeftAt()).isBetween(LocalDateTime.now(ChatTime.KST).minusSeconds(2),
+                LocalDateTime.now(ChatTime.KST).plusSeconds(2));
     }
 }
