@@ -12,6 +12,7 @@ import static org.mockito.Mockito.when;
 
 import com.ktb4.team16.mulo.chat.cursor.ChatMessageCursorCodec;
 import com.ktb4.team16.mulo.chat.dto.response.ChatMessageHistoryResponse;
+import com.ktb4.team16.mulo.chat.event.ChatParticipantLeftDeliveryEvent;
 import com.ktb4.team16.mulo.chat.entity.ChatMessage;
 import com.ktb4.team16.mulo.chat.entity.ChatRoom;
 import com.ktb4.team16.mulo.chat.entity.ChatRoomParticipant;
@@ -27,6 +28,7 @@ import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.context.ApplicationEventPublisher;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.domain.Pageable;
@@ -44,6 +46,7 @@ class ChatRoomRestServiceTest {
     private ChatMessageRepository messageRepository;
     private ChatRoomRestService service;
     private ChatMessageCursorCodec cursorCodec;
+    private ApplicationEventPublisher eventPublisher;
 
     private static final Clock TEST_CLOCK = Clock.fixed(Instant.parse("2026-10-14T14:59:59Z"), ZoneOffset.UTC);
 
@@ -53,6 +56,7 @@ class ChatRoomRestServiceTest {
         participantRepository = mock(ChatRoomParticipantRepository.class);
         messageRepository = mock(ChatMessageRepository.class);
         cursorCodec = new ChatMessageCursorCodec();
+        eventPublisher = mock(ApplicationEventPublisher.class);
         service = service(TEST_CLOCK);
     }
 
@@ -88,16 +92,39 @@ class ChatRoomRestServiceTest {
 
     @Test
     void leavesActiveParticipantAndRejectsDuplicateLeave() {
-        ChatRoomParticipant participant = participant(LocalDateTime.now(), null);
-        arrangeRoomAndParticipant(activeRoom(), participant);
+        ChatRoom room = activeRoom();
+        ChatRoomParticipant participant = enteredParticipant(room, USER_ID, "sender");
+        ChatRoomParticipant peer = enteredParticipant(room, 28L, "peer");
+        arrangeLockedParticipants(room, List.of(participant, peer));
 
         service.leave(CHAT_ROOM_ID, USER_ID);
 
-        verify(participant).leave();
-        verify(participantRepository).findByChatRoomChatRoomIdAndUserIdForUpdate(CHAT_ROOM_ID, USER_ID);
+        assertThat(participant.getLeftAt()).isNotNull();
+        org.mockito.ArgumentCaptor<ChatParticipantLeftDeliveryEvent> eventCaptor =
+                org.mockito.ArgumentCaptor.forClass(ChatParticipantLeftDeliveryEvent.class);
+        verify(eventPublisher).publishEvent(eventCaptor.capture());
+        assertThat(eventCaptor.getValue().recipientUserIds()).containsExactly(28L);
+        assertThat(eventCaptor.getValue().response().type()).isEqualTo("PARTICIPANT_LEFT");
+        assertThat(eventCaptor.getValue().response().chatRoomId()).isEqualTo(CHAT_ROOM_ID);
+        assertThat(eventCaptor.getValue().response().userId()).isEqualTo(USER_ID);
+        assertThat(eventCaptor.getValue().response().nickname()).isEqualTo("sender");
+        assertThat(eventCaptor.getValue().response().leftAt().getOffset()).isEqualTo(ZoneOffset.ofHours(9));
 
-        arrangeRoomAndParticipant(activeRoom(), participant(LocalDateTime.now(), LocalDateTime.now()));
         assertCode(HttpStatus.CONFLICT, "CHAT_ALREADY_LEFT", () -> service.leave(CHAT_ROOM_ID, USER_ID));
+        verify(eventPublisher, org.mockito.Mockito.times(1)).publishEvent(any(ChatParticipantLeftDeliveryEvent.class));
+    }
+
+    @Test
+    void doesNotPublishLeaveEventWhenTheOtherParticipantHasAlreadyLeft() {
+        ChatRoom room = activeRoom();
+        ChatRoomParticipant participant = enteredParticipant(room, USER_ID, "sender");
+        ChatRoomParticipant peer = enteredParticipant(room, 28L, "peer");
+        peer.leave();
+        arrangeLockedParticipants(room, List.of(participant, peer));
+
+        service.leave(CHAT_ROOM_ID, USER_ID);
+
+        verify(eventPublisher, never()).publishEvent(any(ChatParticipantLeftDeliveryEvent.class));
     }
 
     @Test
@@ -107,10 +134,13 @@ class ChatRoomRestServiceTest {
         when(participantRepository.findByChatRoomChatRoomIdAndUserId(CHAT_ROOM_ID, USER_ID)).thenReturn(Optional.empty());
         assertCode(HttpStatus.NOT_FOUND, "CHAT_ROOM_NOT_FOUND", () -> service.leave(CHAT_ROOM_ID, USER_ID));
 
-        ChatRoomParticipant participant = participant(LocalDateTime.now(), null);
-        arrangeRoomAndParticipant(expiredRoom(), participant);
+        ChatRoom expiredRoom = expiredRoom();
+        ChatRoomParticipant participant = enteredParticipant(expiredRoom, USER_ID, "sender");
+        ChatRoomParticipant peer = enteredParticipant(expiredRoom, 28L, "peer");
+        arrangeLockedParticipants(expiredRoom, List.of(participant, peer));
         assertCode(HttpStatus.FORBIDDEN, "CHAT_ROOM_EXPIRED", () -> service.leave(CHAT_ROOM_ID, USER_ID));
-        verify(participant, never()).leave();
+        assertThat(participant.getLeftAt()).isNull();
+        verify(eventPublisher, never()).publishEvent(any(ChatParticipantLeftDeliveryEvent.class));
     }
 
     @Test
@@ -258,7 +288,23 @@ class ChatRoomRestServiceTest {
 
     private ChatRoomRestService service(Clock clock) {
         ChatRoomAccessService accessService = new ChatRoomAccessService(chatRoomRepository, participantRepository, clock);
-        return new ChatRoomRestService(accessService, participantRepository, messageRepository, cursorCodec);
+        return new ChatRoomRestService(accessService, participantRepository, messageRepository, cursorCodec, eventPublisher);
+    }
+
+    private void arrangeLockedParticipants(ChatRoom room, List<ChatRoomParticipant> participants) {
+        when(chatRoomRepository.findById(CHAT_ROOM_ID)).thenReturn(Optional.of(room));
+        List<Long> userIds = participants.stream().map(ChatRoomParticipant::getUserId).sorted().toList();
+        when(participantRepository.findParticipantUserIdsByChatRoomIdOrderByUserId(CHAT_ROOM_ID))
+                .thenReturn(userIds);
+        participants.forEach(value -> when(participantRepository
+                .findByChatRoomChatRoomIdAndUserIdForUpdate(CHAT_ROOM_ID, value.getUserId()))
+                .thenReturn(Optional.of(value)));
+    }
+
+    private ChatRoomParticipant enteredParticipant(ChatRoom room, Long userId, String nickname) {
+        ChatRoomParticipant participant = ChatRoomParticipant.create(room, userId, nickname);
+        participant.enter();
+        return participant;
     }
 
     private ChatRoom activeRoom() {
