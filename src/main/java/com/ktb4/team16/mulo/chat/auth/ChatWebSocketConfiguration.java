@@ -2,10 +2,14 @@ package com.ktb4.team16.mulo.chat.auth;
 
 import java.util.Arrays;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.messaging.simp.config.ChannelRegistration;
 import org.springframework.messaging.simp.config.MessageBrokerRegistry;
+import org.springframework.scheduling.TaskScheduler;
 import org.springframework.web.socket.config.annotation.EnableWebSocketMessageBroker;
 import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
@@ -18,6 +22,7 @@ public class ChatWebSocketConfiguration implements WebSocketMessageBrokerConfigu
     private final String allowedOrigins;
     private final StompConnectAuthenticationInterceptor authenticationInterceptor;
     private final WebSocketSessionRegistry sessionRegistry;
+    private TaskScheduler messageBrokerTaskScheduler;
 
     public ChatWebSocketConfiguration(
             @Value("${chat.websocket.allowed-origins:}") String allowedOrigins,
@@ -27,6 +32,14 @@ public class ChatWebSocketConfiguration implements WebSocketMessageBrokerConfigu
         this.allowedOrigins = allowedOrigins;
         this.authenticationInterceptor = authenticationInterceptor;
         this.sessionRegistry = sessionRegistry;
+    }
+
+    // Spring 메시지 브로커의 스케줄러를 지연 주입해 Heartbeat에 사용합니다.
+    @Autowired
+    public void setMessageBrokerTaskScheduler(
+            @Lazy @Qualifier("messageBrokerTaskScheduler") TaskScheduler messageBrokerTaskScheduler
+    ) {
+        this.messageBrokerTaskScheduler = messageBrokerTaskScheduler;
     }
 
     @Override
@@ -45,11 +58,14 @@ public class ChatWebSocketConfiguration implements WebSocketMessageBrokerConfigu
         registry.setErrorHandler(new SafeStompSubProtocolErrorHandler());
     }
 
+    // 기존 메시지 경로를 유지하고 STOMP 연결에 양방향 10초 Heartbeat를 설정합니다.
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
         registry.setApplicationDestinationPrefixes("/app");
         registry.setUserDestinationPrefix("/user");
-        registry.enableSimpleBroker("/queue");
+        registry.enableSimpleBroker("/queue")
+                .setHeartbeatValue(new long[] {10_000, 10_000})
+                .setTaskScheduler(messageBrokerTaskScheduler);
     }
 
     @Override
