@@ -128,11 +128,14 @@ Destination: 남은 참가자의 `/user/queue/chat-events`
 | 상황 | 오류 코드 | 처리 |
 |---|---|---|
 | CONNECT 인증 실패 | `UNAUTHORIZED` | CONNECT 거부 |
+| 지원하지 않는 STOMP 명령 | `COMMAND_NOT_ALLOWED` | 명령 거부 |
 | 허용되지 않은 SUBSCRIBE | `STOMP_DESTINATION_FORBIDDEN` | 구독 거부 |
+| 허용되지 않은 SEND Destination | `STOMP_DESTINATION_FORBIDDEN` | SEND 거부 |
 | 참가자/입장/퇴장 상태로 SEND 불가 | `CHAT_SEND_FORBIDDEN` | 메시지를 저장하거나 전달하지 않음 |
 | 채팅방 만료 | `CHAT_ROOM_EXPIRED` | 메시지를 저장하거나 전달하지 않음 |
 | 같은 ID를 다른 방 또는 내용에 재사용 | `CLIENT_MESSAGE_ID_CONFLICT` | 기존 메시지를 변경하지 않음 |
 | 메시지 500자 초과 | `MESSAGE_TOO_LONG` | 메시지를 저장하거나 전달하지 않음 |
+| 필수 필드 누락 또는 요청 본문 형식 오류 | `INVALID_INPUT_VALUE` | 메시지를 저장하거나 전달하지 않음 |
 
 STOMP 오류는 HTTP 상태 코드가 아니다. 실패 메시지에 별도 ACK destination을 추가하지 않는다.
 
