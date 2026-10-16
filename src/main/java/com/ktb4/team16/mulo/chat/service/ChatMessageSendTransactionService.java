@@ -7,6 +7,7 @@ import com.ktb4.team16.mulo.chat.entity.ChatMessage;
 import com.ktb4.team16.mulo.chat.entity.ChatRoom;
 import com.ktb4.team16.mulo.chat.entity.ChatRoomParticipant;
 import com.ktb4.team16.mulo.chat.event.ChatMessageDeliveryEvent;
+import com.ktb4.team16.mulo.chat.exception.ChatErrorCode;
 import com.ktb4.team16.mulo.chat.exception.ChatMessageSendException;
 import com.ktb4.team16.mulo.chat.exception.ChatRoomAccessException;
 import com.ktb4.team16.mulo.chat.repository.ChatMessageRepository;
@@ -97,7 +98,6 @@ public class ChatMessageSendTransactionService {
     }
 
     private ChatMessageSendException forbidden(ChatMessageSendRequest request) {
-        return new ChatMessageSendException(
-                "CHAT_SEND_FORBIDDEN", "채팅방에서 메시지를 보낼 수 없습니다.", request.clientMessageId());
+        return new ChatMessageSendException(ChatErrorCode.CHAT_SEND_FORBIDDEN, request.clientMessageId());
     }
 }

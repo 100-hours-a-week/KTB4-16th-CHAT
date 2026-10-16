@@ -1,27 +1,33 @@
 package com.ktb4.team16.mulo.chat.auth.exception;
 
+import com.ktb4.team16.mulo.chat.exception.ChatErrorCode;
+
 public class StompAuthenticationException extends RuntimeException {
 
-    private final String code;
+    private final ChatErrorCode errorCode;
 
-    public StompAuthenticationException(String code, String message) {
-        super(message);
-        this.code = code;
+    public StompAuthenticationException(ChatErrorCode errorCode) {
+        super(errorCode.message());
+        this.errorCode = errorCode;
     }
 
     public String getCode() {
-        return code;
+        return errorCode.code();
     }
 
     public static StompAuthenticationException unauthorized() {
-        return new StompAuthenticationException("UNAUTHORIZED", "UNAUTHORIZED");
+        return new StompAuthenticationException(ChatErrorCode.UNAUTHORIZED);
     }
 
     public static StompAuthenticationException authServiceUnavailable() {
-        return new StompAuthenticationException("AUTH_SERVICE_UNAVAILABLE", "AUTH_SERVICE_UNAVAILABLE");
+        return new StompAuthenticationException(ChatErrorCode.AUTH_SERVICE_UNAVAILABLE);
     }
 
     public static StompAuthenticationException protocolViolation() {
-        return new StompAuthenticationException("COMMAND_NOT_ALLOWED", "COMMAND_NOT_ALLOWED");
+        return new StompAuthenticationException(ChatErrorCode.COMMAND_NOT_ALLOWED);
+    }
+
+    public static StompAuthenticationException destinationForbidden() {
+        return new StompAuthenticationException(ChatErrorCode.STOMP_DESTINATION_FORBIDDEN);
     }
 }

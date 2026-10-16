@@ -60,12 +60,17 @@ public class StompConnectAuthenticationInterceptor implements ChannelInterceptor
         if (!(accessor.getUser() instanceof ChatPrincipal)) {
             throw StompAuthenticationException.unauthorized();
         }
-        if (command == StompCommand.SEND && isAllowedMessageDestination(accessor.getDestination())) {
-            return message;
+        if (command == StompCommand.SEND) {
+            if (isAllowedMessageDestination(accessor.getDestination())) {
+                return message;
+            }
+            throw StompAuthenticationException.destinationForbidden();
         }
-        if (command == StompCommand.SUBSCRIBE
-                && ALLOWED_SUBSCRIPTIONS.contains(accessor.getDestination())) {
-            return message;
+        if (command == StompCommand.SUBSCRIBE) {
+            if (ALLOWED_SUBSCRIPTIONS.contains(accessor.getDestination())) {
+                return message;
+            }
+            throw StompAuthenticationException.destinationForbidden();
         }
         throw StompAuthenticationException.protocolViolation();
     }

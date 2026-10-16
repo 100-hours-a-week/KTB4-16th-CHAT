@@ -1,6 +1,7 @@
 package com.ktb4.team16.mulo.chat.auth.security;
 
 import com.ktb4.team16.mulo.chat.auth.config.BackendAuthProperties;
+import com.ktb4.team16.mulo.chat.exception.ChatErrorCode;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -9,7 +10,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.List;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -38,14 +38,13 @@ public class InternalApiKeyAuthenticationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         if (properties.internalApiKey() == null || properties.internalApiKey().isBlank()) {
-            errorHandler.write(response, HttpStatus.SERVICE_UNAVAILABLE,
-                    "INTERNAL_AUTH_UNAVAILABLE", "내부 인증 설정을 사용할 수 없습니다.");
+            errorHandler.write(response, ChatErrorCode.INTERNAL_AUTH_UNAVAILABLE);
             return;
         }
 
         String apiKey = request.getHeader("X-Internal-Api-Key");
         if (!matchesApiKey(apiKey)) {
-            errorHandler.write(response, HttpStatus.UNAUTHORIZED, "UNAUTHORIZED", "인증이 필요합니다.");
+            errorHandler.write(response, ChatErrorCode.UNAUTHORIZED);
             return;
         }
 

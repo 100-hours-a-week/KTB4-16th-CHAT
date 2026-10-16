@@ -3,11 +3,14 @@ package com.ktb4.team16.mulo.chat.controller;
 import com.ktb4.team16.mulo.chat.auth.security.ChatPrincipal;
 import com.ktb4.team16.mulo.chat.dto.request.ChatMessageSendRequest;
 import com.ktb4.team16.mulo.chat.dto.response.ChatMessageErrorResponse;
+import com.ktb4.team16.mulo.chat.exception.ChatErrorCode;
 import com.ktb4.team16.mulo.chat.exception.ChatMessageSendException;
 import com.ktb4.team16.mulo.chat.service.ChatMessageSendService;
 import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.messaging.MessagingException;
 import org.springframework.messaging.converter.MessageConversionException;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
@@ -23,6 +26,7 @@ import tools.jackson.databind.ObjectMapper;
 @Controller
 public class ChatMessageStompController {
 
+    private static final Logger log = LoggerFactory.getLogger(ChatMessageStompController.class);
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final ChatMessageSendService chatMessageSendService;
@@ -54,16 +58,20 @@ public class ChatMessageStompController {
                             && error.getCode() != null && error.getCode().equals("Size"));
             if (tooLong) {
                 return new ChatMessageErrorResponse(
-                        "MESSAGE_TOO_LONG", "메시지는 500자 이하여야 합니다.", clientMessageId);
+                        ChatErrorCode.MESSAGE_TOO_LONG.code(), ChatErrorCode.MESSAGE_TOO_LONG.message(), clientMessageId);
             }
             return new ChatMessageErrorResponse(
-                    "STOMP_ERROR", "메시지 요청 형식이 올바르지 않습니다.", clientMessageId);
+                    ChatErrorCode.INVALID_INPUT_VALUE.code(), ChatErrorCode.INVALID_INPUT_VALUE.message(),
+                    clientMessageId);
         }
         if (exception instanceof MessageConversionException) {
             return new ChatMessageErrorResponse(
-                    "STOMP_ERROR", "메시지 요청 형식이 올바르지 않습니다.", extractClientMessageId(exception));
+                    ChatErrorCode.INVALID_INPUT_VALUE.code(), ChatErrorCode.INVALID_INPUT_VALUE.message(),
+                    extractClientMessageId(exception));
         }
-        return new ChatMessageErrorResponse("STOMP_ERROR", "메시지를 전송할 수 없습니다.", null);
+        log.error("STOMP 메시지 처리 중 예기치 않은 예외", exception);
+        return new ChatMessageErrorResponse(
+                ChatErrorCode.STOMP_ERROR.code(), ChatErrorCode.STOMP_ERROR.message(), null);
     }
 
     private UUID extractClientMessageId(Exception exception) {

@@ -1,6 +1,7 @@
 package com.ktb4.team16.mulo.chat.auth.security;
 
 import com.ktb4.team16.mulo.chat.auth.exception.StompAuthenticationException;
+import com.ktb4.team16.mulo.chat.exception.ChatErrorCode;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
@@ -34,6 +35,6 @@ public class SafeStompSubProtocolErrorHandler extends StompSubProtocolErrorHandl
             }
             current = current.getCause();
         }
-        return "STOMP_ERROR";
+        return ChatErrorCode.STOMP_ERROR.code();
     }
 }

@@ -8,6 +8,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ktb4.team16.mulo.chat.auth.dto.BackendAuthResponse;
 import com.ktb4.team16.mulo.chat.auth.exception.BackendAuthException;
+import com.ktb4.team16.mulo.chat.exception.ChatErrorCode;
 import com.ktb4.team16.mulo.chat.auth.service.BackendTokenVerifier;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -113,12 +114,10 @@ class StompConnectAuthenticationIntegrationTest {
                 .thenThrow(BackendAuthException.unavailable());
         when(tokenVerifier.verify("backend-forbidden"))
                 .thenThrow(BackendAuthException.forbidden());
-        when(tokenVerifier.verify("backend-timeout")).thenThrow(new BackendAuthException(
-                HttpStatus.GATEWAY_TIMEOUT, "AUTH_SERVICE_TIMEOUT", "sensitive upstream detail"
-        ));
-        when(tokenVerifier.verify("backend-5xx")).thenThrow(new BackendAuthException(
-                HttpStatus.BAD_GATEWAY, "AUTH_SERVICE_ERROR", "sensitive upstream detail"
-        ));
+        when(tokenVerifier.verify("backend-timeout"))
+                .thenThrow(new BackendAuthException(ChatErrorCode.AUTH_SERVICE_TIMEOUT));
+        when(tokenVerifier.verify("backend-5xx"))
+                .thenThrow(new BackendAuthException(ChatErrorCode.AUTH_SERVICE_ERROR));
         when(tokenVerifier.verify("bad-response")).thenReturn(null);
 
         StompSocket expired = connect("Authorization:Bearer expired-token\n");
@@ -147,17 +146,22 @@ class StompConnectAuthenticationIntegrationTest {
     }
 
     @Test
-    void rejectsUnapprovedSubscribeAndSendEvenAfterSuccessfulConnect() throws Exception {
+    void rejectsUnapprovedDestinationsAndUnsupportedCommandsAfterSuccessfulConnect() throws Exception {
         when(tokenVerifier.verify("valid-token"))
                 .thenReturn(new BackendAuthResponse(17L, futureExpiry()));
-        for (String command : List.of(
-                "SUBSCRIBE\nid:sub-1\ndestination:/topic/public\n\n\u0000",
-                "SEND\ndestination:/app/other\ncontent-type:application/json\n\n{}\u0000"
-        )) {
+        List<String[]> rejectedCommands = List.of(
+                new String[]{"SUBSCRIBE\nid:sub-1\ndestination:/topic/public\n\n\u0000",
+                        "STOMP_DESTINATION_FORBIDDEN"},
+                new String[]{"SEND\ndestination:/app/other\ncontent-type:application/json\n\n{}\u0000",
+                        "STOMP_DESTINATION_FORBIDDEN"},
+                new String[]{"ACK\nid:ack-1\n\n\u0000", "COMMAND_NOT_ALLOWED"}
+        );
+        for (String[] rejectedCommand : rejectedCommands) {
             StompSocket socket = connect("Authorization:Bearer valid-token\n");
             assertTrue(socket.awaitFrame());
-            socket.send(command);
+            socket.send(rejectedCommand[0]);
             assertTrue(socket.awaitError());
+            assertTrue(socket.awaitFrameContaining(rejectedCommand[1]));
             assertTrue(socket.awaitClose());
         }
     }

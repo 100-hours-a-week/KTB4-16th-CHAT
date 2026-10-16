@@ -4,17 +4,27 @@ import java.util.UUID;
 
 public class ChatMessageSendException extends RuntimeException {
 
-    private final String code;
+    private final ChatErrorCode errorCode;
     private final UUID clientMessageId;
 
-    public ChatMessageSendException(String code, String message, UUID clientMessageId) {
+    public ChatMessageSendException(ChatErrorCode errorCode, UUID clientMessageId) {
+        super(errorCode.message());
+        this.errorCode = errorCode;
+        this.clientMessageId = clientMessageId;
+    }
+
+    public ChatMessageSendException(ChatErrorCode errorCode, String message, UUID clientMessageId) {
         super(message);
-        this.code = code;
+        this.errorCode = errorCode;
         this.clientMessageId = clientMessageId;
     }
 
     public String getCode() {
-        return code;
+        return errorCode.code();
+    }
+
+    public ChatErrorCode getErrorCode() {
+        return errorCode;
     }
 
     public UUID getClientMessageId() {
@@ -22,15 +32,10 @@ public class ChatMessageSendException extends RuntimeException {
     }
 
     public static ChatMessageSendException conflict(UUID clientMessageId) {
-        return new ChatMessageSendException(
-                "CLIENT_MESSAGE_ID_CONFLICT",
-                "이미 다른 메시지에 사용된 clientMessageId입니다.",
-                clientMessageId
-        );
+        return new ChatMessageSendException(ChatErrorCode.CLIENT_MESSAGE_ID_CONFLICT, clientMessageId);
     }
 
     public static ChatMessageSendException persistenceFailure(UUID clientMessageId) {
-        return new ChatMessageSendException(
-                "STOMP_ERROR", "메시지를 전송할 수 없습니다.", clientMessageId);
+        return new ChatMessageSendException(ChatErrorCode.STOMP_ERROR, clientMessageId);
     }
 }

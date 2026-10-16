@@ -1,11 +1,11 @@
 package com.ktb4.team16.mulo.chat.cursor;
 
 import com.ktb4.team16.mulo.chat.exception.ChatApiException;
+import com.ktb4.team16.mulo.chat.exception.ChatErrorCode;
 import java.nio.charset.StandardCharsets;
 import java.time.DateTimeException;
 import java.time.LocalDateTime;
 import java.util.Base64;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -27,7 +27,7 @@ public class ChatMessageCursorCodec {
             }
             return new Cursor(LocalDateTime.parse(parts[0]), chatMessageId);
         } catch (IllegalArgumentException | DateTimeException exception) {
-            throw new ChatApiException(HttpStatus.BAD_REQUEST, "INVALID_CURSOR", "올바른 커서를 입력해주세요.");
+            throw new ChatApiException(ChatErrorCode.INVALID_CURSOR);
         }
     }
 

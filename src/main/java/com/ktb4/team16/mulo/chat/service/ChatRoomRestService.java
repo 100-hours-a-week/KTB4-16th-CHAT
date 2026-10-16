@@ -8,6 +8,7 @@ import com.ktb4.team16.mulo.chat.entity.ChatMessage;
 import com.ktb4.team16.mulo.chat.entity.ChatRoom;
 import com.ktb4.team16.mulo.chat.entity.ChatRoomParticipant;
 import com.ktb4.team16.mulo.chat.exception.ChatApiException;
+import com.ktb4.team16.mulo.chat.exception.ChatErrorCode;
 import com.ktb4.team16.mulo.chat.exception.ChatRoomAccessException;
 import com.ktb4.team16.mulo.chat.repository.ChatMessageRepository;
 import com.ktb4.team16.mulo.chat.repository.ChatRoomParticipantRepository;
@@ -17,7 +18,6 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Slice;
-import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -48,8 +48,7 @@ public class ChatRoomRestService {
         ChatRoomParticipant participant = findParticipantForUpdate(chatRoomId, userId);
         rejectExpired(room, "만료된 채팅방에는 입장할 수 없습니다.");
         if (participant.getLeftAt() != null) {
-            throw new ChatApiException(HttpStatus.FORBIDDEN,
-                    "CHAT_REENTRY_FORBIDDEN", "퇴장한 채팅방에는 다시 입장할 수 없습니다.");
+            throw new ChatApiException(ChatErrorCode.CHAT_REENTRY_FORBIDDEN);
         }
         participant.enter();
     }
@@ -100,7 +99,7 @@ public class ChatRoomRestService {
         ChatRoomParticipant participant = findParticipantForUpdate(chatRoomId, userId);
         rejectExpired(room, "만료된 채팅방에는 접근할 수 없습니다.");
         if (participant.getLeftAt() != null) {
-            throw new ChatApiException(HttpStatus.CONFLICT, "CHAT_ALREADY_LEFT", "이미 퇴장한 채팅방입니다.");
+            throw new ChatApiException(ChatErrorCode.CHAT_ALREADY_LEFT);
         }
         participant.leave();
     }
@@ -138,7 +137,7 @@ public class ChatRoomRestService {
             accessService.requireActiveParticipant(participant);
         } catch (ChatRoomAccessException exception) {
             if (exception.getReason() == ChatRoomAccessException.Reason.PARTICIPANT_LEFT) {
-                throw forbidden("CHAT_ALREADY_LEFT", "이미 퇴장한 채팅방입니다.");
+                throw new ChatApiException(ChatErrorCode.CHAT_ALREADY_LEFT_FORBIDDEN);
             }
             throw notFound();
         }
@@ -149,17 +148,13 @@ public class ChatRoomRestService {
             accessService.rejectExpired(room);
         } catch (ChatRoomAccessException exception) {
             if (exception.getReason() == ChatRoomAccessException.Reason.ROOM_EXPIRED) {
-                throw forbidden("CHAT_ROOM_EXPIRED", message);
+                throw new ChatApiException(ChatErrorCode.CHAT_ROOM_EXPIRED, message);
             }
             throw exception;
         }
     }
 
     private ChatApiException notFound() {
-        return new ChatApiException(HttpStatus.NOT_FOUND, "CHAT_ROOM_NOT_FOUND", "채팅방을 찾을 수 없습니다.");
-    }
-
-    private ChatApiException forbidden(String code, String message) {
-        return new ChatApiException(HttpStatus.FORBIDDEN, code, message);
+        return new ChatApiException(ChatErrorCode.CHAT_ROOM_NOT_FOUND);
     }
 }

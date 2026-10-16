@@ -3,6 +3,7 @@ package com.ktb4.team16.mulo.chat.auth.security;
 import com.ktb4.team16.mulo.chat.auth.dto.BackendAuthResponse;
 import com.ktb4.team16.mulo.chat.auth.exception.BackendAuthException;
 import com.ktb4.team16.mulo.chat.auth.service.BackendTokenVerifier;
+import com.ktb4.team16.mulo.chat.exception.ChatErrorCode;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -42,8 +43,7 @@ public class BearerTokenAuthenticationFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         String accessToken = extractBearerToken(request.getHeader("Authorization"));
         if (accessToken == null) {
-            errorHandler.write(response, org.springframework.http.HttpStatus.UNAUTHORIZED,
-                    "UNAUTHORIZED", "인증이 필요합니다.");
+            errorHandler.write(response, ChatErrorCode.UNAUTHORIZED);
             return;
         }
 
@@ -59,7 +59,7 @@ public class BearerTokenAuthenticationFilter extends OncePerRequestFilter {
             SecurityContextHolder.setContext(context);
             filterChain.doFilter(request, response);
         } catch (BackendAuthException exception) {
-            errorHandler.write(response, exception.getStatus(), exception.getCode(), exception.getResponseMessage());
+            errorHandler.write(response, exception.getErrorCode());
         } finally {
             SecurityContextHolder.clearContext();
         }
