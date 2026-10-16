@@ -25,6 +25,14 @@ public interface ChatRoomParticipantRepository extends JpaRepository<ChatRoomPar
             @Param("userId") Long userId
     );
 
+    @Query("""
+            select participant.userId
+            from ChatRoomParticipant participant
+            where participant.chatRoom.chatRoomId = :chatRoomId
+            order by participant.userId
+            """)
+    List<Long> findParticipantUserIdsByChatRoomIdOrderByUserId(@Param("chatRoomId") Long chatRoomId);
+
     List<ChatRoomParticipant> findAllByChatRoomChatRoomId(Long chatRoomId);
 
     List<ChatRoomParticipant> findAllByChatRoomChatRoomIdAndJoinedAtIsNotNullAndLeftAtIsNull(Long chatRoomId);

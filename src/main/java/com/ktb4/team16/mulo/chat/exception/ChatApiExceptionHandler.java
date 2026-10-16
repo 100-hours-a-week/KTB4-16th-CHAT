@@ -1,6 +1,6 @@
 package com.ktb4.team16.mulo.chat.exception;
 
-import com.ktb4.team16.mulo.chat.auth.ApiErrorResponse;
+import com.ktb4.team16.mulo.chat.auth.dto.ApiErrorResponse;
 import com.ktb4.team16.mulo.chat.dto.response.ApiValidationErrorResponse;
 import jakarta.validation.ConstraintViolationException;
 import java.util.List;

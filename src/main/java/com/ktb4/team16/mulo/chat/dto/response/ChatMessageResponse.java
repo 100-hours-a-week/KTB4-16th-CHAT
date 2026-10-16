@@ -4,10 +4,11 @@ import java.time.OffsetDateTime;
 import java.util.UUID;
 
 public record ChatMessageResponse(
-        Long chatMessageId,
+        String type,
         Long chatRoomId,
-        Long userId,
+        Long chatMessageId,
         UUID clientMessageId,
+        Long userId,
         String content,
         OffsetDateTime createdAt
 ) {
