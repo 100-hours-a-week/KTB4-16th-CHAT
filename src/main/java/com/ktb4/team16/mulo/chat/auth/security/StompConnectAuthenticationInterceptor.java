@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.regex.Pattern;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
+import org.springframework.messaging.simp.SimpMessageType;
 import org.springframework.messaging.simp.stomp.StompCommand;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.support.ChannelInterceptor;
@@ -39,10 +40,20 @@ public class StompConnectAuthenticationInterceptor implements ChannelInterceptor
         this.clock = clock;
     }
 
+    // CONNECT를 인증하고 DISCONNECT·HEARTBEAT를 처리하며 미구현 명령은 거부합니다.
     @Override
     public Message<?> preSend(Message<?> message, MessageChannel channel) {
         StompHeaderAccessor accessor = MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
-        if (accessor == null || accessor.getCommand() == null) {
+        if (accessor == null) {
+            throw StompAuthenticationException.protocolViolation();
+        }
+        if (accessor.getMessageType() == SimpMessageType.HEARTBEAT) {
+            if (!sessionRegistry.isAuthenticated(accessor.getSessionId())) {
+                throw StompAuthenticationException.unauthorized();
+            }
+            return message;
+        }
+        if (accessor.getCommand() == null) {
             throw StompAuthenticationException.protocolViolation();
         }
         StompCommand command = accessor.getCommand();

@@ -45,6 +45,8 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
+import org.springframework.messaging.simp.user.SimpUser;
+import org.springframework.messaging.simp.user.SimpUserRegistry;
 import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 import org.springframework.web.socket.messaging.SessionSubscribeEvent;
 import org.junit.jupiter.api.BeforeEach;
@@ -62,6 +64,9 @@ class StompConnectAuthenticationIntegrationTest {
 
     @MockitoBean
     private BackendTokenVerifier tokenVerifier;
+
+    @Autowired
+    private SimpUserRegistry simpUserRegistry;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -91,6 +96,73 @@ class StompConnectAuthenticationIntegrationTest {
                 && frame.contains("user-name:17")));
         second.close();
         verify(tokenVerifier, org.mockito.Mockito.times(2)).verify("valid-token");
+    }
+
+    // CONNECTED 프레임에서 서버가 양방향 10초 Heartbeat를 제안하는지 검증합니다.
+    @Test
+    void negotiatesTenSecondHeartbeatsInBothDirections() throws Exception {
+        when(tokenVerifier.verify("valid-token"))
+                .thenReturn(new BackendAuthResponse(17L, futureExpiry()));
+
+        StompSocket socket = connect("Authorization:Bearer valid-token\nheart-beat:10000,10000\n");
+
+        assertTrue(socket.awaitFrame());
+        assertTrue(socket.frames().stream().anyMatch(frame -> frame.contains("CONNECTED")
+                && frame.contains("heart-beat:10000,10000")),
+                () -> String.join("\n", socket.frames()));
+        socket.close();
+    }
+
+    // 클라이언트가 Heartbeat를 보내지 못해도 서버의 유휴 신호가 도착하는지 검증합니다.
+    @Test
+    void sendsServerHeartbeatWhenConnectionIsIdle() throws Exception {
+        when(tokenVerifier.verify("valid-token"))
+                .thenReturn(new BackendAuthResponse(17L, futureExpiry()));
+
+        StompSocket socket = connect("Authorization:Bearer valid-token\nheart-beat:0,10000\n");
+
+        assertTrue(socket.awaitFrame());
+        assertTrue(socket.awaitHeartbeat(), () -> socket.frames().toString());
+        socket.close();
+    }
+
+    // 협상한 클라이언트 Heartbeat가 멈추면 서버가 유휴 연결을 정리하는지 검증합니다.
+    @Test
+    void closesConnectionWhenClientHeartbeatStops() throws Exception {
+        when(tokenVerifier.verify("valid-token"))
+                .thenReturn(new BackendAuthResponse(17L, futureExpiry()));
+
+        StompSocket socket = connect("Authorization:Bearer valid-token\nheart-beat:10000,0\n");
+
+        assertTrue(socket.awaitFrame());
+        assertTrue(socket.listener().closeLatch.await(45, TimeUnit.SECONDS),
+                "클라이언트 Heartbeat가 중단된 연결이 정리되어야 합니다.");
+        assertTrue(awaitSessionCount("17", 0));
+    }
+
+    // 인증된 클라이언트의 개행 Heartbeat가 오류나 연결 종료를 만들지 않는지 검증합니다.
+    @Test
+    void acceptsClientHeartbeatAfterConnect() throws Exception {
+        when(tokenVerifier.verify("valid-token"))
+                .thenReturn(new BackendAuthResponse(17L, futureExpiry()));
+
+        StompSocket socket = connect("Authorization:Bearer valid-token\nheart-beat:10000,10000\n");
+
+        assertTrue(socket.awaitFrame());
+        socket.send("\n");
+        assertTrue(!socket.listener().closeLatch.await(1, TimeUnit.SECONDS),
+                () -> socket.frames().toString());
+        socket.close();
+    }
+
+    // CONNECT 이전에는 Heartbeat도 인증된 활동으로 취급하지 않는지 검증합니다.
+    @Test
+    void rejectsClientHeartbeatBeforeConnect() throws Exception {
+        StompSocket socket = open();
+
+        socket.send("\n");
+
+        assertErrorAndClose(socket);
     }
 
     @Test
@@ -357,6 +429,30 @@ class StompConnectAuthenticationIntegrationTest {
         assertTrue(socket.listener().closed);
     }
 
+    // 비정상 종료 세션만 정리되고 같은 사용자의 나머지 세션은 유지되는지 검증합니다.
+    @Test
+    void abruptTransportFailureRemovesOnlyTheFailedSession() throws Exception {
+        when(tokenVerifier.verify("valid-token"))
+                .thenReturn(new BackendAuthResponse(17L, futureExpiry()));
+        StompSocket first = connect("Authorization:Bearer valid-token\n");
+        StompSocket second = connect("Authorization:Bearer valid-token\n");
+        assertTrue(first.awaitFrame());
+        assertTrue(second.awaitFrame());
+        assertTrue(awaitSessionCount("17", 2));
+
+        first.socket().abort();
+
+        assertTrue(awaitSessionCount("17", 1));
+        assertTrue(!second.listener().closed);
+        StompSocket reconnected = connect("Authorization:Bearer valid-token\n");
+        assertTrue(reconnected.awaitFrame());
+        assertTrue(awaitSessionCount("17", 2));
+        verify(tokenVerifier, org.mockito.Mockito.times(3)).verify("valid-token");
+        reconnected.close();
+        second.close();
+        assertTrue(awaitSessionCount("17", 0));
+    }
+
     @Test
     void duplicateDisconnectDoesNotPreventReceiptOrTransportClosure() throws Exception {
         when(tokenVerifier.verify("valid-token"))
@@ -486,6 +582,20 @@ class StompConnectAuthenticationIntegrationTest {
         assertTrue(socket.frames().stream().anyMatch(frame -> frame.contains("ERROR")));
     }
 
+    // Spring 사용자 레지스트리에 반영된 세션 수를 제한 시간 안에 확인합니다.
+    private boolean awaitSessionCount(String userName, int expected) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < deadline) {
+            SimpUser user = simpUserRegistry.getUser(userName);
+            int actual = user == null ? 0 : user.getSessions().size();
+            if (actual == expected) {
+                return true;
+            }
+            Thread.sleep(10);
+        }
+        return false;
+    }
+
     private record StompSocket(WebSocket socket, RecordingListener listener) {
 
         private boolean awaitFrame() throws InterruptedException {
@@ -547,6 +657,18 @@ class StompConnectAuthenticationIntegrationTest {
 
         private boolean awaitClose() throws InterruptedException {
             return listener.closeLatch.await(5, TimeUnit.SECONDS);
+        }
+
+        // 일반 프레임과 구별되는 개행 Heartbeat가 도착할 때까지 기다립니다.
+        private boolean awaitHeartbeat() throws InterruptedException {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(25);
+            while (System.nanoTime() < deadline) {
+                if (listener.frames.stream().anyMatch(frame -> frame.equals("\n") || frame.equals("\r\n"))) {
+                    return true;
+                }
+                Thread.sleep(10);
+            }
+            return false;
         }
 
         private List<String> frames() {
