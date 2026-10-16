@@ -2,7 +2,6 @@ package com.ktb4.team16.mulo.chat.exception;
 
 import org.springframework.http.HttpStatus;
 
-/** Chat Server가 REST와 STOMP 응답에 사용하는 공개 오류 코드와 기본 정보를 관리한다. */
 public enum ChatErrorCode {
     UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "인증이 필요합니다."),
     FORBIDDEN(HttpStatus.FORBIDDEN, "접근 권한이 없습니다."),
