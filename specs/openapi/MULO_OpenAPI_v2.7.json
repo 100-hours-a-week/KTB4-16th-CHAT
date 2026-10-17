@@ -7131,7 +7131,7 @@
         ],
         "summary": "내부 채팅방 생성 또는 멱등 조회",
         "operationId": "postInternalChatRooms",
-        "description": "Backend가 매칭 성사 후 Chat Server에 호출한다. Backend는 매칭 성사 날짜의 다음 날 00:00:00 Asia/Seoul을 expiresAt으로 계산해 보낸다.\n\n- 신규 생성은 201 Created와 chatRoomId를 반환한다.\n- 같은 matchId, 두 participant, expiresAt 재요청은 200 OK와 기존 chatRoomId를 반환한다.\n- 이미 존재하는 matchId의 participant 또는 expiresAt이 다르면 409 CHAT_ROOM_CONFLICT다.\n- 기존 방이 없는 만료 매칭의 신규 생성은 409 CHAT_ROOM_EXPIRED다. 기존 방 멱등 재요청과 구분한다.\n- 참가자는 정확히 2명이어야 한다.",
+        "description": "Backend가 매칭 성사 후 Chat Server에 호출한다. Backend는 매칭 성사 날짜의 다음 날 00:00:00 Asia/Seoul을 expiresAt으로 계산해 보낸다.\n\n- 신규 생성은 201 Created와 chatRoomId를 반환한다.\n- 같은 matchId, 두 participant, expiresAt 재요청은 200 OK와 기존 chatRoomId를 반환한다.\n- 이미 존재하는 matchId의 participant 또는 expiresAt이 다르면 409 CHAT_ROOM_CONFLICT다.\n- 기존 방이 없는 만료 매칭의 신규 생성은 409 CHAT_ROOM_EXPIRED다. 기존 방 멱등 재요청과 구분한다.\n- 참가자는 서로 다른 userId를 가진 정확히 2명이어야 한다.",
         "requestBody": {
           "required": true,
           "content": {
@@ -7240,7 +7240,7 @@
             }
           },
           "400": {
-            "description": "요청값 형식이 잘못됐거나 참가자가 정확히 두 명이 아니다.",
+            "description": "요청값 형식이 잘못됐거나 참가자 두 명의 userId가 서로 다르지 않다.",
             "content": {
               "application/json": {
                 "schema": {
@@ -7262,7 +7262,7 @@
                 },
                 "example": {
                   "code": "UNAUTHORIZED",
-                  "message": "내부 인증에 실패했습니다."
+                  "message": "인증이 필요합니다."
                 }
               }
             }
@@ -7300,7 +7300,7 @@
           }
         ],
         "x-api-owner": "Chat Server",
-        "x-implementation-status": "contract-only"
+        "x-implementation-status": "implemented"
       }
     },
     "/internal/chat-rooms/by-match/{matchId}": {

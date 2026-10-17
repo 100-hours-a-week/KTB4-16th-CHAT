@@ -24,4 +24,13 @@ class ChatErrorCodeTest {
         assertThat(ChatErrorCode.CHAT_ALREADY_LEFT_FORBIDDEN.code()).isEqualTo("CHAT_ALREADY_LEFT");
         assertThat(ChatErrorCode.CHAT_ALREADY_LEFT_FORBIDDEN.status()).isEqualTo(HttpStatus.FORBIDDEN);
     }
+
+    @Test
+    @DisplayName("내부 채팅방 생성 만료와 충돌은 명세의 409 오류 코드를 사용한다")
+    void mapsInternalChatRoomCreationConflicts() {
+        assertThat(ChatErrorCode.CHAT_ROOM_CREATE_EXPIRED.code()).isEqualTo("CHAT_ROOM_EXPIRED");
+        assertThat(ChatErrorCode.CHAT_ROOM_CREATE_EXPIRED.status()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(ChatErrorCode.CHAT_ROOM_CONFLICT.code()).isEqualTo("CHAT_ROOM_CONFLICT");
+        assertThat(ChatErrorCode.CHAT_ROOM_CONFLICT.status()).isEqualTo(HttpStatus.CONFLICT);
+    }
 }

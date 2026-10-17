@@ -9,6 +9,7 @@ import com.ktb4.team16.mulo.chat.entity.ChatRoomParticipant;
 import jakarta.persistence.EntityManager;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
@@ -44,6 +45,28 @@ class ChatRoomRepositoryTest {
 
         assertThat(loadedChatRoom.getExpiresAt()).isEqualTo(LocalDateTime.parse("2026-10-14T00:00:00"));
         assertThat(loadedChatRoom.getCreatedAt()).isBetween(beforePersist, afterPersist);
+    }
+
+    @Test
+    void persistsNewInternalRoomWithTwoUnenteredParticipants() {
+        ChatRoom room = chatRoomRepository.saveAndFlush(ChatRoom.create(
+                205_003L, OffsetDateTime.parse("2026-10-16T00:00:00+09:00")));
+        participantRepository.saveAllAndFlush(List.of(
+                ChatRoomParticipant.create(room, 205_003L, "jettie"),
+                ChatRoomParticipant.create(room, 205_004L, "lulu")
+        ));
+        entityManager.clear();
+
+        ChatRoom loadedRoom = chatRoomRepository.findByMatchId(205_003L).orElseThrow();
+        List<ChatRoomParticipant> participants =
+                participantRepository.findAllByChatRoomChatRoomId(loadedRoom.getChatRoomId());
+
+        assertThat(participants).hasSize(2)
+                .allSatisfy(participant -> {
+                    assertThat(participant.getJoinedAt()).isNull();
+                    assertThat(participant.getLeftAt()).isNull();
+                });
+        assertThat(loadedRoom.getExpiresAt()).isEqualTo(LocalDateTime.parse("2026-10-16T00:00:00"));
     }
 
     @Test
