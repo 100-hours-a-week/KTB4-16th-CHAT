@@ -67,7 +67,8 @@ content-type: application/json
 
 - `clientMessageId`는 클라이언트가 생성하는 UUID다.
 - 서버는 인증/권한을 확인한 뒤 `clientMessageId` 중복 여부를 확인하고 신규 메시지를 MySQL에 저장한다.
-- DB COMMIT 성공 후 발신자와 상대방의 사용자별 큐로 결과를 보낸다.
+- DB COMMIT 성공 후 각 수신자의 참가 상태를 전달 직전에 다시 확인한 뒤 사용자별 큐로 결과를 보낸다. 확인 시점에 퇴장한 수신자에게는 전달하지 않는다.
+- SEND가 유효하게 COMMIT된 경우, 전달 시점에 채팅방 만료 시각이 지났더라도 MESSAGE 전달을 허용하며 전달 단계에서 만료 여부를 다시 확인하지 않는다.
 - 발신자도 같은 결과를 수신하며 `clientMessageId`로 전송 성공을 확인한다. 별도의 ACK destination은 없다.
 
 ### 성공 이벤트
