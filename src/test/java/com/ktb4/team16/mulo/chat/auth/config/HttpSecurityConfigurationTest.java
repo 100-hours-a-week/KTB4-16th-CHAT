@@ -1,13 +1,19 @@
 package com.ktb4.team16.mulo.chat.auth.config;
 
-import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ktb4.team16.mulo.chat.auth.dto.BackendAuthResponse;
 import com.ktb4.team16.mulo.chat.auth.service.BackendTokenVerifier;
+import com.ktb4.team16.mulo.chat.dto.response.CreateChatRoomResponse;
+import com.ktb4.team16.mulo.chat.service.ChatRoomCreateService;
 import java.time.OffsetDateTime;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +35,9 @@ class HttpSecurityConfigurationTest {
 
     @MockitoBean
     private BackendTokenVerifier tokenVerifier;
+
+    @MockitoBean
+    private ChatRoomCreateService chatRoomCreateService;
 
     @Test
     void requiresBackendVerifiedBearerForChatRoomApi() throws Exception {
@@ -53,6 +62,44 @@ class HttpSecurityConfigurationTest {
                 .andExpect(status().isNotFound());
         mockMvc.perform(get("/public"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void protectsInternalChatRoomCreationAndReturnsCreatedOrIdempotentStatus() throws Exception {
+        String request = """
+                {"matchId": 50, "expiresAt": "2026-10-14T00:00:00+09:00", "participants": [
+                  {"userId": 17, "nickname": "jettie"}, {"userId": 28, "nickname": "lulu"}]}
+                """;
+        mockMvc.perform(post("/internal/chat-rooms").contentType(APPLICATION_JSON).content(request))
+                .andExpect(status().isUnauthorized());
+
+        when(chatRoomCreateService.create(any())).thenReturn(
+                new ChatRoomCreateService.Result(new CreateChatRoomResponse(30L), true));
+        mockMvc.perform(post("/internal/chat-rooms")
+                        .header("X-Internal-Api-Key", "test-internal-key")
+                        .contentType(APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.chatRoomId").value(30));
+
+        when(chatRoomCreateService.create(any())).thenReturn(
+                new ChatRoomCreateService.Result(new CreateChatRoomResponse(30L), false));
+        mockMvc.perform(post("/internal/chat-rooms")
+                        .header("X-Internal-Api-Key", "test-internal-key")
+                        .contentType(APPLICATION_JSON)
+                        .content(request))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.chatRoomId").value(30));
+    }
+
+    @Test
+    void validatesInternalChatRoomCreationPayloadBeforeCallingService() throws Exception {
+        mockMvc.perform(post("/internal/chat-rooms")
+                        .header("X-Internal-Api-Key", "test-internal-key")
+                        .contentType(APPLICATION_JSON)
+                        .content("{\"matchId\":50,\"expiresAt\":\"2026-10-14T00:00:00+09:00\",\"participants\":[]}"))
+                .andExpect(status().isBadRequest());
+        verifyNoInteractions(chatRoomCreateService);
     }
 
     @Test
