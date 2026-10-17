@@ -2,6 +2,10 @@ package com.ktb4.team16.mulo.chat.auth.security;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -10,7 +14,12 @@ import com.ktb4.team16.mulo.chat.auth.dto.BackendAuthResponse;
 import com.ktb4.team16.mulo.chat.auth.exception.BackendAuthException;
 import com.ktb4.team16.mulo.chat.exception.ChatErrorCode;
 import com.ktb4.team16.mulo.chat.auth.service.BackendTokenVerifier;
+import com.ktb4.team16.mulo.chat.dto.response.ChatMessageResponse;
+import com.ktb4.team16.mulo.chat.event.ChatMessageDeliveryEvent;
 import com.ktb4.team16.mulo.chat.event.ChatParticipantLeftDeliveryEvent;
+import com.ktb4.team16.mulo.chat.repository.ChatRoomParticipantRepository;
+import com.ktb4.team16.mulo.chat.service.ChatMessageDeliveryListener;
+import com.ktb4.team16.mulo.chat.service.ChatMessageEventDeliveryService;
 import com.ktb4.team16.mulo.chat.service.ChatRoomRestService;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -34,6 +43,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.context.ApplicationEvent;
 import org.springframework.context.ApplicationListener;
 import org.springframework.context.annotation.Bean;
@@ -48,8 +58,12 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.http.HttpStatus;
+import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.messaging.simp.user.SimpUser;
@@ -74,6 +88,9 @@ class StompConnectAuthenticationIntegrationTest {
     @MockitoBean
     private BackendTokenVerifier tokenVerifier;
 
+    @MockitoSpyBean
+    private SimpMessagingTemplate messagingTemplate;
+
     @Autowired
     private SimpUserRegistry simpUserRegistry;
 
@@ -87,7 +104,19 @@ class StompConnectAuthenticationIntegrationTest {
     private LeaveEventExpiryGate leaveEventExpiryGate;
 
     @Autowired
+    private MessageDeliveryGate messageDeliveryGate;
+
+    @Autowired
     private ChatRoomRestService chatRoomRestService;
+
+    @Autowired
+    private ChatMessageEventDeliveryService chatMessageEventDeliveryService;
+
+    @Autowired
+    private ChatMessageDeliveryListener chatMessageDeliveryListener;
+
+    @Autowired
+    private ChatRoomParticipantRepository participantRepository;
 
     @Autowired
     private PlatformTransactionManager transactionManager;
@@ -96,6 +125,7 @@ class StompConnectAuthenticationIntegrationTest {
     void clearRecordedSubscriptions() {
         subscriptionEvents.clear();
         leaveEventExpiryGate.reset();
+        messageDeliveryGate.reset();
     }
 
     @Test
@@ -263,6 +293,8 @@ class StompConnectAuthenticationIntegrationTest {
                 .thenReturn(new BackendAuthResponse(17L, futureExpiry()));
         when(tokenVerifier.verify("peer-token"))
                 .thenReturn(new BackendAuthResponse(28L, futureExpiry()));
+        when(tokenVerifier.verify("third-token"))
+                .thenReturn(new BackendAuthResponse(99L, futureExpiry()));
         long chatRoomId = createActiveRoom();
         StompSocket sender = null;
         StompSocket senderSecondSession = null;
@@ -351,6 +383,347 @@ class StompConnectAuthenticationIntegrationTest {
             closeQuietly(sender);
             closeQuietly(senderSecondSession);
             closeQuietly(peer);
+            jdbcTemplate.update("DELETE FROM chat_rooms WHERE chat_room_id = ?", chatRoomId);
+        }
+    }
+
+    @Test
+    void committedMessageRemainsStoredWhenOneRecipientDeliveryFails() throws Exception {
+        when(tokenVerifier.verify("sender-token"))
+                .thenReturn(new BackendAuthResponse(17L, futureExpiry()));
+        when(tokenVerifier.verify("peer-token"))
+                .thenReturn(new BackendAuthResponse(28L, futureExpiry()));
+        long chatRoomId = createActiveRoom();
+        AtomicInteger senderDeliveryFailures = new AtomicInteger();
+        StompSocket sender = null;
+        StompSocket peer = null;
+
+        doAnswer(invocation -> {
+            if (invocation.getArgument(0, String.class).equals("17")) {
+                senderDeliveryFailures.incrementAndGet();
+                throw new IllegalStateException("테스트 전달 실패");
+            }
+            return invocation.callRealMethod();
+        }).when(messagingTemplate).convertAndSendToUser(
+                any(String.class), eq("/queue/chat-messages"), any(ChatMessageResponse.class));
+
+        try {
+            sender = connect("Authorization:Bearer sender-token\n");
+            peer = connect("Authorization:Bearer peer-token\n");
+            assertTrue(sender.awaitFrame());
+            assertTrue(peer.awaitFrame());
+            subscribe(sender, "sender-message-failure", "/user/queue/chat-messages", 1);
+            subscribe(peer, "peer-message-failure", "/user/queue/chat-messages", 1);
+
+            UUID clientMessageId = UUID.randomUUID();
+            sender.send(sendFrame(chatRoomId, "{\"clientMessageId\":\"" + clientMessageId
+                    + "\",\"content\":\"수신자 전달 실패 검증\"}"));
+
+            assertTrue(peer.awaitFrameContaining(clientMessageId.toString()));
+            assertTrue(sender.awaitStableFrameCountContaining(
+                    clientMessageId.toString(), 0, Duration.ofMillis(300)));
+            assertThat(senderDeliveryFailures).hasValue(1);
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM chat_messages WHERE chat_room_id = ? AND client_message_id = ?",
+                    Long.class, chatRoomId, clientMessageId.toString())).isEqualTo(1L);
+        } finally {
+            closeQuietly(sender);
+            closeQuietly(peer);
+            jdbcTemplate.update("DELETE FROM chat_rooms WHERE chat_room_id = ?", chatRoomId);
+        }
+    }
+
+    @Test
+    void suppressesMessageForAnyParticipantWhoLeavesAfterSendCommit() throws Exception {
+        assertMessageSuppressedAfterLeave("peer-token", "sender-token", 28L, 17L);
+        assertMessageSuppressedAfterLeave("sender-token", "peer-token", 17L, 28L);
+    }
+
+    @Test
+    void deliversCommittedMessageAfterRoomExpiresBeforeDispatch() throws Exception {
+        when(tokenVerifier.verify("sender-token"))
+                .thenReturn(new BackendAuthResponse(17L, futureExpiry()));
+        when(tokenVerifier.verify("peer-token"))
+                .thenReturn(new BackendAuthResponse(28L, futureExpiry()));
+        when(tokenVerifier.verify("third-token"))
+                .thenReturn(new BackendAuthResponse(99L, futureExpiry()));
+        long chatRoomId = createActiveRoom();
+        StompSocket sender = null;
+        StompSocket peer = null;
+        StompSocket thirdParty = null;
+        messageDeliveryGate.pauseNextEvent();
+        try {
+            sender = connect("Authorization:Bearer sender-token\n");
+            peer = connect("Authorization:Bearer peer-token\n");
+            thirdParty = connect("Authorization:Bearer third-token\n");
+            assertTrue(sender.awaitFrame());
+            assertTrue(peer.awaitFrame());
+            assertTrue(thirdParty.awaitFrame());
+            subscribe(sender, "sender-messages", "/user/queue/chat-messages", 1);
+            subscribe(peer, "peer-messages", "/user/queue/chat-messages", 1);
+            subscribe(thirdParty, "third-messages", "/user/queue/chat-messages", 1);
+
+            UUID clientMessageId = UUID.randomUUID();
+            sender.send(sendFrame(chatRoomId, "{\"clientMessageId\":\"" + clientMessageId
+                    + "\",\"content\":\"커밋 후 만료\"}"));
+
+            assertTrue(messageDeliveryGate.awaitEvent(), "SEND 커밋 후 전달 직전에서 대기해야 합니다.");
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM chat_messages WHERE chat_room_id = ? AND client_message_id = ?",
+                    Long.class, chatRoomId, clientMessageId.toString())).isEqualTo(1L);
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT expires_at FROM chat_rooms WHERE chat_room_id = ?", Timestamp.class, chatRoomId)
+                    .toLocalDateTime()).isAfter(LocalDateTime.now(java.time.ZoneId.of("Asia/Seoul")));
+
+            LocalDateTime expiredAt = LocalDateTime.of(2000, 1, 1, 0, 0);
+            jdbcTemplate.update("UPDATE chat_rooms SET expires_at = ? WHERE chat_room_id = ?",
+                    Timestamp.valueOf(expiredAt), chatRoomId);
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT expires_at FROM chat_rooms WHERE chat_room_id = ?", Timestamp.class, chatRoomId)
+                    .toLocalDateTime()).isEqualTo(expiredAt);
+
+            messageDeliveryGate.releaseEvent();
+            assertTrue(sender.awaitFrameContaining(clientMessageId.toString()));
+            assertTrue(peer.awaitFrameContaining(clientMessageId.toString()));
+            assertTrue(thirdParty.awaitStableFrameCountContaining(
+                    clientMessageId.toString(), 0, Duration.ofMillis(300)));
+        } finally {
+            messageDeliveryGate.releaseEvent();
+            closeQuietly(sender);
+            closeQuietly(peer);
+            closeQuietly(thirdParty);
+            jdbcTemplate.update("DELETE FROM chat_rooms WHERE chat_room_id = ?", chatRoomId);
+        }
+    }
+
+    @Test
+    void eachRecipientUsesAnIndependentTransactionAndTheRowLockCoversDispatch() throws Exception {
+        long chatRoomId = createActiveRoom();
+        CountDownLatch dispatchStarted = new CountDownLatch(1);
+        CountDownLatch releaseDispatch = new CountDownLatch(1);
+        CountDownLatch lockAttemptStarted = new CountDownLatch(1);
+        CountDownLatch lockAcquired = new CountDownLatch(1);
+        AtomicInteger deliveryCalls = new AtomicInteger();
+        AtomicInteger completedTransactions = new AtomicInteger();
+
+        doAnswer(invocation -> {
+            assertTrue(TransactionSynchronizationManager.isActualTransactionActive());
+            int callNumber = deliveryCalls.incrementAndGet();
+            assertThat(completedTransactions.get()).isEqualTo(callNumber - 1);
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCompletion(int status) {
+                    completedTransactions.incrementAndGet();
+                }
+            });
+            if (callNumber == 1) {
+                dispatchStarted.countDown();
+                assertTrue(releaseDispatch.await(10, TimeUnit.SECONDS), "전달 잠금 테스트가 해제되어야 합니다.");
+            }
+            return invocation.callRealMethod();
+        }).when(messagingTemplate).convertAndSendToUser(
+                any(String.class), eq("/queue/chat-messages"), any(ChatMessageResponse.class));
+
+        ChatMessageResponse response = new ChatMessageResponse(
+                "MESSAGE", chatRoomId, 1001L, UUID.randomUUID(), 17L, "lock test", OffsetDateTime.now(ZoneOffset.UTC));
+        CompletableFuture<Void> delivery = CompletableFuture.runAsync(() -> {
+            chatMessageEventDeliveryService.deliverIfActive(chatRoomId, 17L, response);
+            chatMessageEventDeliveryService.deliverIfActive(chatRoomId, 28L, response);
+        });
+        CompletableFuture<Void> competingLock = null;
+        try {
+            assertTrue(dispatchStarted.await(5, TimeUnit.SECONDS));
+            competingLock = CompletableFuture.runAsync(() -> new TransactionTemplate(transactionManager)
+                    .executeWithoutResult(status -> {
+                        lockAttemptStarted.countDown();
+                        participantRepository.findByChatRoomChatRoomIdAndUserIdForUpdate(chatRoomId, 17L)
+                                .orElseThrow();
+                        lockAcquired.countDown();
+                    }));
+            assertTrue(lockAttemptStarted.await(5, TimeUnit.SECONDS));
+            assertFalse(lockAcquired.await(200, TimeUnit.MILLISECONDS),
+                    "MESSAGE 발행 중에는 해당 참가자 행 잠금이 유지되어야 합니다.");
+
+            releaseDispatch.countDown();
+            delivery.get(5, TimeUnit.SECONDS);
+            assertTrue(lockAcquired.await(5, TimeUnit.SECONDS));
+            competingLock.get(5, TimeUnit.SECONDS);
+            assertThat(deliveryCalls).hasValue(2);
+            assertThat(completedTransactions).hasValue(2);
+        } finally {
+            releaseDispatch.countDown();
+            if (competingLock != null) {
+                competingLock.get(5, TimeUnit.SECONDS);
+            }
+            jdbcTemplate.update("DELETE FROM chat_rooms WHERE chat_room_id = ?", chatRoomId);
+        }
+    }
+
+    @Test
+    void leaveTransactionThatLocksFirstPreventsSubsequentMessageDelivery() throws Exception {
+        long chatRoomId = createActiveRoom();
+        CountDownLatch leaveLockAcquired = new CountDownLatch(1);
+        CountDownLatch releaseLeaveTransaction = new CountDownLatch(1);
+        CountDownLatch deliveryAttemptStarted = new CountDownLatch(1);
+        ChatMessageResponse response = new ChatMessageResponse(
+                "MESSAGE", chatRoomId, 1003L, UUID.randomUUID(), 17L, "leave lock first", OffsetDateTime.now());
+
+        CompletableFuture<Void> leaveTransaction = CompletableFuture.runAsync(() ->
+                new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+                    var recipient = participantRepository.findByChatRoomChatRoomIdAndUserIdForUpdate(chatRoomId, 28L)
+                            .orElseThrow();
+                    leaveLockAcquired.countDown();
+                    try {
+                        assertTrue(releaseLeaveTransaction.await(10, TimeUnit.SECONDS),
+                                "퇴장 트랜잭션 잠금 테스트가 해제되어야 합니다.");
+                    } catch (InterruptedException exception) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException("퇴장 트랜잭션 잠금 테스트가 중단되었습니다.", exception);
+                    }
+                    recipient.leave();
+                }));
+        CompletableFuture<Void> delivery = null;
+        try {
+            assertTrue(leaveLockAcquired.await(5, TimeUnit.SECONDS));
+            delivery = CompletableFuture.runAsync(() -> {
+                deliveryAttemptStarted.countDown();
+                chatMessageEventDeliveryService.deliverIfActive(chatRoomId, 28L, response);
+            });
+            assertTrue(deliveryAttemptStarted.await(5, TimeUnit.SECONDS));
+            CompletableFuture<Void> pendingDelivery = delivery;
+            assertThrows(java.util.concurrent.TimeoutException.class,
+                    () -> pendingDelivery.get(200, TimeUnit.MILLISECONDS),
+                    "퇴장 트랜잭션이 먼저 획득한 참가자 잠금 동안 MESSAGE 전달이 대기해야 합니다.");
+
+            releaseLeaveTransaction.countDown();
+            leaveTransaction.get(5, TimeUnit.SECONDS);
+            delivery.get(5, TimeUnit.SECONDS);
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT left_at FROM chat_room_participants WHERE chat_room_id = ? AND user_id = ?",
+                    Timestamp.class, chatRoomId, 28L)).isNotNull();
+            verify(messagingTemplate, org.mockito.Mockito.never()).convertAndSendToUser(
+                    eq("28"), eq("/queue/chat-messages"), eq(response));
+        } finally {
+            releaseLeaveTransaction.countDown();
+            leaveTransaction.get(5, TimeUnit.SECONDS);
+            if (delivery != null) {
+                delivery.get(5, TimeUnit.SECONDS);
+            }
+            jdbcTemplate.update("DELETE FROM chat_rooms WHERE chat_room_id = ?", chatRoomId);
+        }
+    }
+
+    @Test
+    void concurrentLeaveWaitsForMessageDispatchHoldingTheParticipantLock() throws Exception {
+        when(tokenVerifier.verify("sender-token"))
+                .thenReturn(new BackendAuthResponse(17L, futureExpiry()));
+        long chatRoomId = createActiveRoom();
+        CountDownLatch dispatchStarted = new CountDownLatch(1);
+        CountDownLatch releaseDispatch = new CountDownLatch(1);
+        CountDownLatch leaveAttemptStarted = new CountDownLatch(1);
+
+        doAnswer(invocation -> {
+            if (invocation.getArgument(0, String.class).equals("17")) {
+                dispatchStarted.countDown();
+                assertTrue(releaseDispatch.await(10, TimeUnit.SECONDS), "전달 잠금 테스트가 해제되어야 합니다.");
+            }
+            return invocation.callRealMethod();
+        }).when(messagingTemplate).convertAndSendToUser(
+                any(String.class), eq("/queue/chat-messages"), any(ChatMessageResponse.class));
+
+        ChatMessageResponse response = new ChatMessageResponse(
+                "MESSAGE", chatRoomId, 1002L, UUID.randomUUID(), 17L, "leave race", OffsetDateTime.now(ZoneOffset.UTC));
+        CompletableFuture<Void> delivery = CompletableFuture.runAsync(() -> chatMessageDeliveryListener.deliver(
+                new ChatMessageDeliveryEvent(response, List.of(17L, 28L))));
+        CompletableFuture<HttpResponse<String>> leave = null;
+        try {
+            assertTrue(dispatchStarted.await(5, TimeUnit.SECONDS));
+            leave = CompletableFuture.supplyAsync(() -> {
+                leaveAttemptStarted.countDown();
+                try {
+                    return leaveRequest(chatRoomId, "sender-token");
+                } catch (Exception exception) {
+                    throw new CompletionException(exception);
+                }
+            });
+            assertTrue(leaveAttemptStarted.await(5, TimeUnit.SECONDS));
+            CompletableFuture<HttpResponse<String>> leaveAttempt = leave;
+            assertThrows(java.util.concurrent.TimeoutException.class,
+                    () -> leaveAttempt.get(200, TimeUnit.MILLISECONDS),
+                    "MESSAGE 전달 중 참가자 잠금을 획득한 퇴장 요청은 대기해야 합니다.");
+
+            releaseDispatch.countDown();
+            delivery.get(5, TimeUnit.SECONDS);
+            assertThat(leave.get(5, TimeUnit.SECONDS).statusCode()).isEqualTo(200);
+            verify(messagingTemplate).convertAndSendToUser(
+                    eq("17"), eq("/queue/chat-messages"), eq(response));
+            verify(messagingTemplate).convertAndSendToUser(
+                    eq("28"), eq("/queue/chat-messages"), eq(response));
+        } finally {
+            releaseDispatch.countDown();
+            if (leave != null) {
+                leave.get(5, TimeUnit.SECONDS);
+            }
+            delivery.get(5, TimeUnit.SECONDS);
+            jdbcTemplate.update("DELETE FROM chat_rooms WHERE chat_room_id = ?", chatRoomId);
+        }
+    }
+
+    private void assertMessageSuppressedAfterLeave(
+            String leavingToken,
+            String remainingToken,
+            long leavingUserId,
+            long remainingUserId
+    ) throws Exception {
+        when(tokenVerifier.verify("sender-token"))
+                .thenReturn(new BackendAuthResponse(17L, futureExpiry()));
+        when(tokenVerifier.verify("peer-token"))
+                .thenReturn(new BackendAuthResponse(28L, futureExpiry()));
+        when(tokenVerifier.verify("third-token"))
+                .thenReturn(new BackendAuthResponse(99L, futureExpiry()));
+        long chatRoomId = createActiveRoom();
+        StompSocket sender = null;
+        StompSocket peer = null;
+        StompSocket thirdParty = null;
+        messageDeliveryGate.pauseNextEvent();
+        try {
+            sender = connect("Authorization:Bearer sender-token\n");
+            peer = connect("Authorization:Bearer peer-token\n");
+            thirdParty = connect("Authorization:Bearer third-token\n");
+            assertTrue(sender.awaitFrame());
+            assertTrue(peer.awaitFrame());
+            assertTrue(thirdParty.awaitFrame());
+            subscribe(sender, "sender-messages", "/user/queue/chat-messages", 1);
+            subscribe(peer, "peer-messages", "/user/queue/chat-messages", 1);
+            subscribe(thirdParty, "third-messages", "/user/queue/chat-messages", 1);
+
+            UUID clientMessageId = UUID.randomUUID();
+            sender.send(sendFrame(chatRoomId, "{\"clientMessageId\":\"" + clientMessageId
+                    + "\",\"content\":\"퇴장 경합\"}"));
+            assertTrue(messageDeliveryGate.awaitEvent(), "SEND 커밋 후 전달 직전에서 대기해야 합니다.");
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM chat_messages WHERE chat_room_id = ? AND client_message_id = ?",
+                    Long.class, chatRoomId, clientMessageId.toString())).isEqualTo(1L);
+
+            HttpResponse<String> leaveResponse = leaveRequest(chatRoomId, leavingToken);
+            assertThat(leaveResponse.statusCode()).isEqualTo(200);
+            assertThat(jdbcTemplate.queryForObject(
+                    "SELECT left_at FROM chat_room_participants WHERE chat_room_id = ? AND user_id = ?",
+                    Timestamp.class, chatRoomId, leavingUserId)).isNotNull();
+
+            messageDeliveryGate.releaseEvent();
+            StompSocket leaver = leavingUserId == 17L ? sender : peer;
+            StompSocket remaining = remainingUserId == 17L ? sender : peer;
+            assertTrue(remaining.awaitFrameContaining(clientMessageId.toString()));
+            assertTrue(leaver.awaitStableFrameCountContaining(
+                    clientMessageId.toString(), 0, Duration.ofMillis(300)));
+            assertTrue(thirdParty.awaitStableFrameCountContaining(
+                    clientMessageId.toString(), 0, Duration.ofMillis(300)));
+        } finally {
+            messageDeliveryGate.releaseEvent();
+            closeQuietly(sender);
+            closeQuietly(peer);
+            closeQuietly(thirdParty);
             jdbcTemplate.update("DELETE FROM chat_rooms WHERE chat_room_id = ?", chatRoomId);
         }
     }
@@ -915,6 +1288,11 @@ class StompConnectAuthenticationIntegrationTest {
         LeaveEventExpiryGate leaveEventExpiryGate() {
             return new LeaveEventExpiryGate();
         }
+
+        @Bean
+        MessageDeliveryGate messageDeliveryGate() {
+            return new MessageDeliveryGate();
+        }
     }
 
     static class LeaveEventExpiryGate {
@@ -960,6 +1338,54 @@ class StompConnectAuthenticationIntegrationTest {
             } catch (InterruptedException exception) {
                 Thread.currentThread().interrupt();
                 throw new IllegalStateException("퇴장 이벤트 경계 테스트가 중단되었습니다.", exception);
+            }
+        }
+    }
+
+    static class MessageDeliveryGate {
+
+        private volatile CountDownLatch eventReached;
+        private volatile CountDownLatch releaseEvent;
+
+        void pauseNextEvent() {
+            eventReached = new CountDownLatch(1);
+            releaseEvent = new CountDownLatch(1);
+        }
+
+        boolean awaitEvent() throws InterruptedException {
+            CountDownLatch reached = eventReached;
+            return reached != null && reached.await(5, TimeUnit.SECONDS);
+        }
+
+        void releaseEvent() {
+            CountDownLatch release = releaseEvent;
+            if (release != null) {
+                release.countDown();
+            }
+        }
+
+        void reset() {
+            releaseEvent();
+            eventReached = null;
+            releaseEvent = null;
+        }
+
+        @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+        @Order(org.springframework.core.Ordered.HIGHEST_PRECEDENCE)
+        public void pauseBeforeMessageDelivery(ChatMessageDeliveryEvent ignored) {
+            CountDownLatch reached = eventReached;
+            CountDownLatch release = releaseEvent;
+            if (reached == null || release == null) {
+                return;
+            }
+            reached.countDown();
+            try {
+                if (!release.await(10, TimeUnit.SECONDS)) {
+                    throw new IllegalStateException("메시지 전달 경계 테스트 대기 시간이 초과되었습니다.");
+                }
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("메시지 전달 경계 테스트가 중단되었습니다.", exception);
             }
         }
     }
