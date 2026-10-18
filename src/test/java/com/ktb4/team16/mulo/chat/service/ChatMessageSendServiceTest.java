@@ -18,6 +18,9 @@ import com.ktb4.team16.mulo.chat.entity.ChatRoomParticipant;
 import com.ktb4.team16.mulo.chat.event.ChatMessageDeliveryEvent;
 import com.ktb4.team16.mulo.chat.exception.ChatMessageSendException;
 import com.ktb4.team16.mulo.chat.exception.ChatRoomAccessException;
+import com.ktb4.team16.mulo.chat.moderation.client.ChatModerationClient;
+import com.ktb4.team16.mulo.chat.moderation.client.ChatModerationUnavailableException;
+import com.ktb4.team16.mulo.chat.moderation.service.ChatMessageWordFilter;
 import com.ktb4.team16.mulo.chat.repository.ChatMessageRepository;
 import com.ktb4.team16.mulo.chat.repository.ChatRoomParticipantRepository;
 import com.ktb4.team16.mulo.chat.repository.ChatRoomRepository;
@@ -55,13 +58,18 @@ class ChatMessageSendServiceTest {
 
     private ChatMessageSendTransactionService transactionService;
     private ChatMessageSendService sendService;
+    private final ChatMessageSendPrecheckService precheckService = mock(ChatMessageSendPrecheckService.class);
+    private final ChatMessageWordFilter wordFilter = mock(ChatMessageWordFilter.class);
+    private final ChatModerationClient moderationClient = mock(ChatModerationClient.class);
 
     @BeforeEach
     void setUp() {
         ChatRoomAccessService accessService = new ChatRoomAccessService(
                 roomRepository, participantRepository, TEST_CLOCK);
         transactionService = new ChatMessageSendTransactionService(accessService, messageRepository, eventPublisher);
-        sendService = new ChatMessageSendService(transactionService, mock(ChatMessageIdempotencyResolver.class));
+        sendService = new ChatMessageSendService(
+                transactionService, mock(ChatMessageIdempotencyResolver.class), precheckService, wordFilter, moderationClient);
+        when(precheckService.requiresModeration(eq(CHAT_ROOM_ID), eq(SENDER_ID), any())).thenReturn(false);
 
         when(roomRepository.findById(CHAT_ROOM_ID)).thenReturn(Optional.of(room));
         when(room.getChatRoomId()).thenReturn(CHAT_ROOM_ID);
@@ -165,7 +173,9 @@ class ChatMessageSendServiceTest {
     void resolvesUniqueConstraintRaceOutsideTheSaveTransaction() {
         ChatMessageSendTransactionService saveTransaction = mock(ChatMessageSendTransactionService.class);
         ChatMessageIdempotencyResolver resolver = mock(ChatMessageIdempotencyResolver.class);
-        ChatMessageSendService service = new ChatMessageSendService(saveTransaction, resolver);
+        ChatMessageSendService service = new ChatMessageSendService(saveTransaction, resolver,
+                mock(ChatMessageSendPrecheckService.class), mock(ChatMessageWordFilter.class),
+                mock(ChatModerationClient.class));
         UUID clientMessageId = UUID.randomUUID();
         ChatMessageSendRequest request = new ChatMessageSendRequest(clientMessageId, "안녕하세요");
         doThrow(new DataIntegrityViolationException("unique constraint"))
@@ -294,6 +304,126 @@ class ChatMessageSendServiceTest {
         InOrder lockOrder = inOrder(participantRepository);
         lockOrder.verify(participantRepository).findByChatRoomChatRoomIdAndUserIdForUpdate(CHAT_ROOM_ID, SENDER_ID);
         lockOrder.verify(participantRepository).findByChatRoomChatRoomIdAndUserIdForUpdate(CHAT_ROOM_ID, PEER_ID);
+    }
+
+    @Test
+    @DisplayName("욕설 감지 시 AI 검사와 저장을 건너뛴다")
+    void blocksBadWordBeforeCallingAiOrSaving() {
+        UUID clientMessageId = UUID.randomUUID();
+        ChatMessageSendRequest request = new ChatMessageSendRequest(clientMessageId, "시1발");
+        when(precheckService.requiresModeration(CHAT_ROOM_ID, SENDER_ID, request)).thenReturn(true);
+        when(wordFilter.filter(request.content())).thenReturn(new ChatMessageWordFilter.Result(true, false));
+
+        assertThatThrownBy(() -> sendService.send(CHAT_ROOM_ID, SENDER_ID, request))
+                .isInstanceOf(ChatMessageSendException.class)
+                .extracting(exception -> ((ChatMessageSendException) exception).getCode())
+                .isEqualTo("PROHIBITED_WORD");
+
+        verify(moderationClient, never()).isToxic(any(), any(), any());
+        verify(messageRepository, never()).saveAndFlush(any());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    @DisplayName("스팸 감지 시 AI 검사와 저장을 건너뛴다")
+    void blocksSpamBeforeCallingAiOrSaving() {
+        UUID clientMessageId = UUID.randomUUID();
+        ChatMessageSendRequest request = new ChatMessageSendRequest(clientMessageId, "010-1234-5678");
+        when(precheckService.requiresModeration(CHAT_ROOM_ID, SENDER_ID, request)).thenReturn(true);
+        when(wordFilter.filter(request.content())).thenReturn(new ChatMessageWordFilter.Result(false, true));
+
+        assertThatThrownBy(() -> sendService.send(CHAT_ROOM_ID, SENDER_ID, request))
+                .isInstanceOf(ChatMessageSendException.class)
+                .extracting(exception -> ((ChatMessageSendException) exception).getCode())
+                .isEqualTo("SPAM_DETECTED");
+
+        verify(moderationClient, never()).isToxic(any(), any(), any());
+        verify(messageRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    @DisplayName("유해하지 않은 AI 판정은 기존 트랜잭션 저장으로 이어진다")
+    void sendsCleanMessageToModerationBeforeTransaction() {
+        UUID clientMessageId = UUID.randomUUID();
+        ChatMessageSendRequest request = new ChatMessageSendRequest(clientMessageId, "좋은 노래네요");
+        when(precheckService.requiresModeration(CHAT_ROOM_ID, SENDER_ID, request)).thenReturn(true);
+        when(wordFilter.filter(request.content())).thenReturn(new ChatMessageWordFilter.Result(false, false));
+        when(moderationClient.isToxic(CHAT_ROOM_ID, SENDER_ID, request.content())).thenReturn(false);
+        when(messageRepository.findByUserIdAndClientMessageId(SENDER_ID, clientMessageId.toString()))
+                .thenReturn(Optional.empty());
+        when(messageRepository.saveAndFlush(any(ChatMessage.class))).thenReturn(savedMessage);
+        stubSavedMessage(savedMessage, request);
+
+        sendService.send(CHAT_ROOM_ID, SENDER_ID, request);
+
+        InOrder flow = inOrder(precheckService, wordFilter, moderationClient, messageRepository);
+        flow.verify(precheckService).requiresModeration(CHAT_ROOM_ID, SENDER_ID, request);
+        flow.verify(wordFilter).filter(request.content());
+        flow.verify(moderationClient).isToxic(CHAT_ROOM_ID, SENDER_ID, request.content());
+        flow.verify(messageRepository).saveAndFlush(any(ChatMessage.class));
+    }
+
+    @Test
+    @DisplayName("유해 AI 판정은 저장과 전달 없이 차단한다")
+    void blocksToxicMessageWithoutPersistence() {
+        UUID clientMessageId = UUID.randomUUID();
+        ChatMessageSendRequest request = new ChatMessageSendRequest(clientMessageId, "내용");
+        when(precheckService.requiresModeration(CHAT_ROOM_ID, SENDER_ID, request)).thenReturn(true);
+        when(wordFilter.filter(request.content())).thenReturn(new ChatMessageWordFilter.Result(false, false));
+        when(moderationClient.isToxic(CHAT_ROOM_ID, SENDER_ID, request.content())).thenReturn(true);
+
+        assertThatThrownBy(() -> sendService.send(CHAT_ROOM_ID, SENDER_ID, request))
+                .isInstanceOf(ChatMessageSendException.class)
+                .extracting(exception -> ((ChatMessageSendException) exception).getCode())
+                .isEqualTo("MESSAGE_BLOCKED");
+
+        verify(messageRepository, never()).saveAndFlush(any());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    @DisplayName("AI 장애는 fail-safe 오류로 차단하고 저장하지 않는다")
+    void failsClosedWhenModerationIsUnavailable() {
+        UUID clientMessageId = UUID.randomUUID();
+        ChatMessageSendRequest request = new ChatMessageSendRequest(clientMessageId, "내용");
+        when(precheckService.requiresModeration(CHAT_ROOM_ID, SENDER_ID, request)).thenReturn(true);
+        when(wordFilter.filter(request.content())).thenReturn(new ChatMessageWordFilter.Result(false, false));
+        when(moderationClient.isToxic(CHAT_ROOM_ID, SENDER_ID, request.content()))
+                .thenThrow(new ChatModerationUnavailableException());
+
+        assertThatThrownBy(() -> sendService.send(CHAT_ROOM_ID, SENDER_ID, request))
+                .isInstanceOf(ChatMessageSendException.class)
+                .extracting(exception -> ((ChatMessageSendException) exception).getCode())
+                .isEqualTo("MODERATION_UNAVAILABLE");
+
+        verify(messageRepository, never()).saveAndFlush(any());
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    @DisplayName("동일한 기존 멱등 요청은 AI 검사를 생략하고 기존 트랜잭션을 재사용한다")
+    void skipsModerationForExactIdempotentReplay() {
+        UUID clientMessageId = UUID.randomUUID();
+        ChatMessageSendRequest request = new ChatMessageSendRequest(clientMessageId, "같은 내용");
+        ChatMessage existing = message(clientMessageId, request.content());
+        when(precheckService.requiresModeration(CHAT_ROOM_ID, SENDER_ID, request)).thenReturn(false);
+        when(messageRepository.findByUserIdAndClientMessageId(SENDER_ID, clientMessageId.toString()))
+                .thenReturn(Optional.of(existing));
+
+        sendService.send(CHAT_ROOM_ID, SENDER_ID, request);
+
+        verify(wordFilter, never()).filter(any());
+        verify(moderationClient, never()).isToxic(any(), any(), any());
+        verify(eventPublisher).publishEvent(any(ChatMessageDeliveryEvent.class));
+    }
+
+    private void stubSavedMessage(ChatMessage target, ChatMessageSendRequest request) {
+        when(target.getChatMessageId()).thenReturn(101L);
+        when(target.getChatRoom()).thenReturn(room);
+        when(target.getUserId()).thenReturn(SENDER_ID);
+        when(target.getClientMessageId()).thenReturn(request.clientMessageId().toString());
+        when(target.getContent()).thenReturn(request.content());
+        when(target.getCreatedAt()).thenReturn(LocalDateTime.parse("2026-10-14T23:00:00"));
     }
 
     private ChatMessage message(UUID clientMessageId, String content) {

@@ -20,6 +20,8 @@ import com.ktb4.team16.mulo.chat.event.ChatParticipantLeftDeliveryEvent;
 import com.ktb4.team16.mulo.chat.repository.ChatRoomParticipantRepository;
 import com.ktb4.team16.mulo.chat.service.ChatMessageDeliveryListener;
 import com.ktb4.team16.mulo.chat.service.ChatMessageEventDeliveryService;
+import com.ktb4.team16.mulo.chat.moderation.client.ChatModerationClient;
+import com.ktb4.team16.mulo.chat.moderation.service.ChatMessageWordFilter;
 import com.ktb4.team16.mulo.chat.service.ChatRoomRestService;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -88,6 +90,12 @@ class StompConnectAuthenticationIntegrationTest {
     @MockitoBean
     private BackendTokenVerifier tokenVerifier;
 
+    @MockitoBean
+    private ChatModerationClient moderationClient;
+
+    @MockitoBean
+    private ChatMessageWordFilter wordFilter;
+
     @MockitoSpyBean
     private SimpMessagingTemplate messagingTemplate;
 
@@ -123,6 +131,8 @@ class StompConnectAuthenticationIntegrationTest {
 
     @BeforeEach
     void clearRecordedSubscriptions() {
+        when(wordFilter.filter(any())).thenReturn(new ChatMessageWordFilter.Result(false, false));
+        when(moderationClient.isToxic(any(), any(), any())).thenReturn(false);
         subscriptionEvents.clear();
         leaveEventExpiryGate.reset();
         messageDeliveryGate.reset();

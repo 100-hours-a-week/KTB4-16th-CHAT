@@ -48,6 +48,18 @@ class ChatMessageStompControllerTest {
     }
 
     @Test
+    @DisplayName("모더레이션 차단 코드를 기존 사용자 오류 응답으로 전달한다")
+    void mapsModerationBlockToStompErrorResponse() {
+        UUID clientMessageId = UUID.randomUUID();
+
+        ChatMessageErrorResponse response = controller.handleSendError(
+                new ChatMessageSendException(ChatErrorCode.PROHIBITED_WORD, clientMessageId));
+
+        assertThat(response.code()).isEqualTo("PROHIBITED_WORD");
+        assertThat(response.clientMessageId()).isEqualTo(clientMessageId);
+    }
+
+    @Test
     @DisplayName("본문 길이 검증 실패는 구체적인 오류 코드로 전달한다")
     void mapsContentLengthViolationToSpecificError() throws NoSuchMethodException {
         Method method = ChatMessageStompController.class.getDeclaredMethod(
