@@ -7,6 +7,7 @@ import com.ktb4.team16.mulo.chat.auth.security.WebSocketHandshakeRequestMatcher;
 import com.ktb4.team16.mulo.chat.auth.service.BackendTokenVerifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -37,6 +38,7 @@ public class HttpSecurityConfiguration {
                         .accessDeniedHandler(errorHandler)
                 )
                 .authorizeHttpRequests(authorize -> authorize
+                        .requestMatchers(HttpMethod.GET, "/health").permitAll()
                         .requestMatchers(webSocketHandshakeMatcher).permitAll()
                         .requestMatchers("/api/chat-rooms", "/api/chat-rooms/**").hasRole("CHAT_USER")
                         .requestMatchers("/internal", "/internal/**").hasRole("INTERNAL_SERVICE")

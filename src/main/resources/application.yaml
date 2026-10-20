@@ -23,6 +23,7 @@ chat:
   moderation:
     ai:
       base-url: ${CHAT_MODERATION_AI_BASE_URL:}
+      internal-token: ${AI_INTERNAL_TOKEN:}
       connect-timeout: ${CHAT_MODERATION_AI_CONNECT_TIMEOUT:1s}
       response-timeout: ${CHAT_MODERATION_AI_RESPONSE_TIMEOUT:1s}
 

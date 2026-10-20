@@ -4,9 +4,15 @@ import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "chat.moderation.ai")
-public record ChatModerationProperties(String baseUrl, Duration connectTimeout, Duration responseTimeout) {
+public record ChatModerationProperties(
+        String baseUrl,
+        String internalToken,
+        Duration connectTimeout,
+        Duration responseTimeout
+) {
 
     public boolean isConfigured() {
-        return baseUrl != null && !baseUrl.isBlank();
+        return baseUrl != null && !baseUrl.isBlank()
+                && internalToken != null && !internalToken.isBlank();
     }
 }
