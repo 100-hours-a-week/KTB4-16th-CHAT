@@ -13,6 +13,8 @@ import com.ktb4.team16.mulo.chat.exception.ChatRoomAccessException;
 import com.ktb4.team16.mulo.chat.repository.ChatMessageRepository;
 import java.util.List;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ChatMessageSendTransactionService {
 
     private static final String MESSAGE_TYPE = "MESSAGE";
+    private static final Logger log = LoggerFactory.getLogger(ChatMessageSendTransactionService.class);
 
     private final ChatRoomAccessService chatRoomAccessService;
     private final ChatMessageRepository messageRepository;
@@ -38,24 +41,54 @@ public class ChatMessageSendTransactionService {
 
     @Transactional
     public void send(Long chatRoomId, Long userId, ChatMessageSendRequest request) {
-        ChatRoom room = chatRoomAccessService.findRoom(chatRoomId);
-        List<ChatRoomParticipant> participants = chatRoomAccessService.findParticipantsForUpdate(chatRoomId);
+        ChatRoom room;
+        try {
+            room = chatRoomAccessService.findRoom(chatRoomId);
+        } catch (ChatRoomAccessException exception) {
+            String reason = exception.getReason() == ChatRoomAccessException.Reason.ROOM_NOT_FOUND
+                    ? "ROOM_NOT_FOUND" : "ACCESS_" + exception.getReason().name();
+            logDenied(chatRoomId, userId, request, reason, null);
+            throw exception;
+        }
+        List<ChatRoomParticipant> participants;
+        try {
+            participants = chatRoomAccessService.findParticipantsForUpdate(chatRoomId);
+        } catch (ChatRoomAccessException exception) {
+            logDenied(chatRoomId, userId, request, "PARTICIPANT_ROW_NOT_FOUND_DURING_LOCK", null);
+            throw exception;
+        }
         if (participants.size() != 2) {
+            logDenied(chatRoomId, userId, request, "PARTICIPANT_COUNT_MISMATCH", participants);
             throw forbidden(request);
         }
 
         ChatRoomParticipant sender = participants.stream()
                 .filter(participant -> participant.getUserId().equals(userId))
                 .findFirst()
-                .orElseThrow(() -> new ChatRoomAccessException(
-                        ChatRoomAccessException.Reason.PARTICIPANT_NOT_FOUND));
-        chatRoomAccessService.rejectExpired(room);
-        chatRoomAccessService.requireActiveParticipant(sender);
+                .orElse(null);
+        if (sender == null) {
+            logDenied(chatRoomId, userId, request, "SENDER_NOT_FOUND", participants);
+            throw new ChatRoomAccessException(ChatRoomAccessException.Reason.PARTICIPANT_NOT_FOUND);
+        }
+        try {
+            chatRoomAccessService.rejectExpired(room);
+        } catch (ChatRoomAccessException exception) {
+            logDenied(chatRoomId, userId, request, "ROOM_EXPIRED", participants);
+            throw exception;
+        }
+        try {
+            chatRoomAccessService.requireActiveParticipant(sender);
+        } catch (ChatRoomAccessException exception) {
+            String reason = sender.getLeftAt() != null ? "SENDER_LEFT" : "SENDER_NOT_JOINED";
+            logDenied(chatRoomId, userId, request, reason, participants);
+            throw exception;
+        }
 
         List<ChatRoomParticipant> activeParticipants = participants.stream()
                 .filter(chatRoomAccessService::isActiveParticipant)
                 .toList();
         if (activeParticipants.size() != 2) {
+            logDenied(chatRoomId, userId, request, "PEER_NOT_ACTIVE", participants);
             throw forbidden(request);
         }
 
@@ -73,7 +106,11 @@ public class ChatMessageSendTransactionService {
         ChatRoomParticipant peer = activeParticipants.stream()
                 .filter(participant -> !participant.getUserId().equals(userId))
                 .findFirst()
-                .orElseThrow(() -> forbidden(request));
+                .orElse(null);
+        if (peer == null) {
+            logDenied(chatRoomId, userId, request, "PEER_NOT_FOUND_AFTER_ACTIVE_CHECK", participants);
+            throw forbidden(request);
+        }
         ChatMessage saved = messageRepository.saveAndFlush(ChatMessage.create(
                 room, userId, request.clientMessageId().toString(), request.content()));
         publish(saved, List.of(userId, peer.getUserId()));
@@ -99,5 +136,16 @@ public class ChatMessageSendTransactionService {
 
     private ChatMessageSendException forbidden(ChatMessageSendRequest request) {
         return new ChatMessageSendException(ChatErrorCode.CHAT_SEND_FORBIDDEN, request.clientMessageId());
+    }
+
+    private void logDenied(
+            Long chatRoomId,
+            Long userId,
+            ChatMessageSendRequest request,
+            String reason,
+            List<ChatRoomParticipant> participants
+    ) {
+        ChatSendDiagnosticLogger.warn(log, chatRoomId, userId,
+                request == null ? null : request.clientMessageId(), "transaction", reason, participants);
     }
 }

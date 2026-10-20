@@ -7,12 +7,16 @@ import com.ktb4.team16.mulo.chat.exception.ChatRoomAccessException;
 import com.ktb4.team16.mulo.chat.moderation.client.ChatModerationClient;
 import com.ktb4.team16.mulo.chat.moderation.client.ChatModerationUnavailableException;
 import com.ktb4.team16.mulo.chat.moderation.service.ChatMessageWordFilter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 
 @Service
 public class ChatMessageSendService {
+
+    private static final Logger log = LoggerFactory.getLogger(ChatMessageSendService.class);
 
     private final ChatMessageSendTransactionService transactionService;
     private final ChatMessageIdempotencyResolver idempotencyResolver;
@@ -36,6 +40,8 @@ public class ChatMessageSendService {
 
     public void send(Long chatRoomId, Long userId, ChatMessageSendRequest request) {
         if (chatRoomId == null || chatRoomId <= 0) {
+            ChatSendDiagnosticLogger.warn(log, chatRoomId, userId, request.clientMessageId(),
+                    "precheck", "INVALID_CHAT_ROOM_ID", null);
             throw new ChatMessageSendException(ChatErrorCode.CHAT_SEND_FORBIDDEN, request.clientMessageId());
         }
         try {
