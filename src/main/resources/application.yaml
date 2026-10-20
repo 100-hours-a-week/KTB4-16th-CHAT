@@ -29,3 +29,15 @@ chat:
 
 server:
   port: 8081
+
+# 상태 확인과 Prometheus 지표 엔드포인트를 HTTP로 노출한다.
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,prometheus
+
+sentry:
+  dsn: ${SENTRY_DSN:}
+  send-default-pii: false
+  max-request-body-size: none
