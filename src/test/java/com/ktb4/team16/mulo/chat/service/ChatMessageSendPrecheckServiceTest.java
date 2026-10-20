@@ -10,7 +10,8 @@ import com.ktb4.team16.mulo.chat.entity.ChatMessage;
 import com.ktb4.team16.mulo.chat.entity.ChatRoom;
 import com.ktb4.team16.mulo.chat.entity.ChatRoomParticipant;
 import com.ktb4.team16.mulo.chat.exception.ChatMessageSendException;
-import com.ktb4.team16.mulo.chat.exception.ChatRoomAccessException;
+import com.ktb4.team16.mulo.chat.exception.ChatSendAccessException;
+import com.ktb4.team16.mulo.chat.exception.ChatSendDiagnostic;
 import com.ktb4.team16.mulo.chat.repository.ChatMessageRepository;
 import com.ktb4.team16.mulo.chat.repository.ChatRoomParticipantRepository;
 import java.util.List;
@@ -91,7 +92,12 @@ class ChatMessageSendPrecheckServiceTest {
         when(participantRepository.findAllByChatRoomChatRoomId(ROOM_ID)).thenReturn(List.of(sender));
 
         assertThatThrownBy(() -> service.requiresModeration(ROOM_ID, SENDER_ID, request("본문")))
-                .isInstanceOf(ChatRoomAccessException.class);
+                .isInstanceOf(ChatSendAccessException.class)
+                .satisfies(exception -> {
+                    ChatSendDiagnostic diagnostic = ((ChatSendAccessException) exception).getDiagnostic();
+                    assertThat(diagnostic.stage()).isEqualTo(ChatSendDiagnostic.Stage.PRECHECK);
+                    assertThat(diagnostic.reason()).isEqualTo(ChatSendDiagnostic.Reason.PARTICIPANT_COUNT_MISMATCH);
+                });
     }
 
     private ChatMessageSendRequest request(String content) {

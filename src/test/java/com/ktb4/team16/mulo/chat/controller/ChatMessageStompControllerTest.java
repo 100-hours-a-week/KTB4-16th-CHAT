@@ -4,16 +4,19 @@ import static org.mockito.Mockito.verify;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ktb4.team16.mulo.chat.auth.security.ChatPrincipal;
+import com.ktb4.team16.mulo.chat.config.ChatSendDiagnosticAvailability;
 import com.ktb4.team16.mulo.chat.dto.request.ChatMessageSendRequest;
 import com.ktb4.team16.mulo.chat.dto.response.ChatMessageErrorResponse;
 import com.ktb4.team16.mulo.chat.exception.ChatErrorCode;
 import com.ktb4.team16.mulo.chat.exception.ChatMessageSendException;
+import com.ktb4.team16.mulo.chat.exception.ChatSendDiagnostic;
 import com.ktb4.team16.mulo.chat.service.ChatMessageSendService;
 import java.lang.reflect.Method;
 import java.util.UUID;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
+import tools.jackson.databind.ObjectMapper;
 import org.springframework.core.MethodParameter;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.handler.annotation.support.MethodArgumentNotValidException;
@@ -24,7 +27,8 @@ import org.springframework.validation.BeanPropertyBindingResult;
 class ChatMessageStompControllerTest {
 
     private final ChatMessageSendService sendService = Mockito.mock(ChatMessageSendService.class);
-    private final ChatMessageStompController controller = new ChatMessageStompController(sendService);
+    private final ChatMessageStompController controller = new ChatMessageStompController(
+            sendService, new ChatSendDiagnosticAvailability(false));
 
     @Test
     @DisplayName("인증된 사용자와 검증된 요청을 메시지 전송 서비스에 전달한다")
@@ -45,6 +49,43 @@ class ChatMessageStompControllerTest {
 
         assertThat(response).isEqualTo(new ChatMessageErrorResponse(
                 "CLIENT_MESSAGE_ID_CONFLICT", "이미 다른 메시지에 사용된 clientMessageId입니다.", clientMessageId));
+    }
+
+    @Test
+    @DisplayName("격리 개발 진단이 활성화되면 제한된 사유만 오류 응답에 포함한다")
+    void includesDiagnosticDetailsWhenEnabled() throws Exception {
+        UUID clientMessageId = UUID.randomUUID();
+        ChatMessageStompController diagnosticController = new ChatMessageStompController(
+                sendService, new ChatSendDiagnosticAvailability(true));
+        ChatMessageSendException exception = new ChatMessageSendException(
+                ChatErrorCode.CHAT_SEND_FORBIDDEN,
+                clientMessageId,
+                new ChatSendDiagnostic(ChatSendDiagnostic.Stage.PRECHECK,
+                        ChatSendDiagnostic.Reason.PEER_NOT_ACTIVE));
+
+        ChatMessageErrorResponse response = diagnosticController.handleSendError(exception);
+
+        assertThat(response.debug()).isEqualTo(new ChatMessageErrorResponse.Debug("precheck", "PEER_NOT_ACTIVE"));
+        assertThat(new ObjectMapper().writeValueAsString(response))
+                .contains("\"debug\":{\"stage\":\"precheck\",\"reason\":\"PEER_NOT_ACTIVE\"}")
+                .doesNotContain("userId", "nickname", "participantCount", "content");
+    }
+
+    @Test
+    @DisplayName("진단이 비활성화되면 debug 필드 없이 기존 오류 JSON을 반환한다")
+    void omitsDiagnosticDetailsWhenDisabled() throws Exception {
+        ChatMessageSendException exception = new ChatMessageSendException(
+                ChatErrorCode.CHAT_SEND_FORBIDDEN,
+                UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                new ChatSendDiagnostic(ChatSendDiagnostic.Stage.TRANSACTION,
+                        ChatSendDiagnostic.Reason.SENDER_LEFT));
+
+        ChatMessageErrorResponse response = controller.handleSendError(exception);
+        String json = new ObjectMapper().writeValueAsString(response);
+
+        assertThat(response.debug()).isNull();
+        assertThat(json).doesNotContain("debug");
+        assertThat(json).contains("code", "message", "clientMessageId");
     }
 
     @Test
