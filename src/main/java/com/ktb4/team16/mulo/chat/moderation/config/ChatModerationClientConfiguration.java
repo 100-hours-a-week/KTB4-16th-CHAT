@@ -13,6 +13,7 @@ public class ChatModerationClientConfiguration {
     HttpClient chatModerationHttpClient(ChatModerationProperties properties) {
         return HttpClient.newBuilder()
                 .connectTimeout(properties.connectTimeout())
+                .version(HttpClient.Version.HTTP_1_1)
                 .build();
     }
 }
