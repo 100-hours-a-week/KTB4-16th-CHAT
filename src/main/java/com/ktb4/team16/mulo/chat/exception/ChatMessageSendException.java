@@ -6,17 +6,24 @@ public class ChatMessageSendException extends RuntimeException {
 
     private final ChatErrorCode errorCode;
     private final UUID clientMessageId;
+    private final ChatSendDiagnostic diagnostic;
 
     public ChatMessageSendException(ChatErrorCode errorCode, UUID clientMessageId) {
+        this(errorCode, clientMessageId, null);
+    }
+
+    public ChatMessageSendException(ChatErrorCode errorCode, UUID clientMessageId, ChatSendDiagnostic diagnostic) {
         super(errorCode.message());
         this.errorCode = errorCode;
         this.clientMessageId = clientMessageId;
+        this.diagnostic = diagnostic;
     }
 
     public ChatMessageSendException(ChatErrorCode errorCode, String message, UUID clientMessageId) {
         super(message);
         this.errorCode = errorCode;
         this.clientMessageId = clientMessageId;
+        this.diagnostic = null;
     }
 
     public String getCode() {
@@ -29,6 +36,10 @@ public class ChatMessageSendException extends RuntimeException {
 
     public UUID getClientMessageId() {
         return clientMessageId;
+    }
+
+    public ChatSendDiagnostic getDiagnostic() {
+        return diagnostic;
     }
 
     public static ChatMessageSendException conflict(UUID clientMessageId) {

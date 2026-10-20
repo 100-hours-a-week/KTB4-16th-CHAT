@@ -142,6 +142,8 @@ Destination: 남은 참가자의 `/user/queue/chat-events`
 
 STOMP 오류는 HTTP 상태 코드가 아니다. 실패 메시지에 별도 ACK destination을 추가하지 않는다.
 
+`CHAT_SEND_FORBIDDEN` 응답은 기본적으로 기존 `code`, `message`, `clientMessageId` 필드만 포함한다. `CHAT_STOMP_SEND_DIAGNOSTICS_ENABLED=true`와 `CHAT_DEPLOYMENT_ENVIRONMENT=development`가 모두 설정되고 운영 프로필(`prod`, `production`)이 활성화되지 않은 경우에만 제한된 `debug` 객체(`stage`, 허용된 `reason` 코드)를 추가할 수 있다. 배포 환경 표식이 없거나 개발 환경이 아니면 진단 응답은 비활성화되며 애플리케이션 기동을 막지 않는다. 개발 배포 workflow에서만 두 값을 설정하고 운영 배포에는 전달하지 않는다. `debug`에는 사용자 식별자, 참가자 상태, 메시지 본문 또는 저장소 세부 정보를 포함하지 않는다.
+
 ## HTTP 메시지 복구
 
 - 재연결 후 놓친 메시지는 HTTP `GET /api/chat-rooms/{chatRoomId}/messages`로 복구한다.

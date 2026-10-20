@@ -17,7 +17,7 @@ import com.ktb4.team16.mulo.chat.entity.ChatRoom;
 import com.ktb4.team16.mulo.chat.entity.ChatRoomParticipant;
 import com.ktb4.team16.mulo.chat.event.ChatMessageDeliveryEvent;
 import com.ktb4.team16.mulo.chat.exception.ChatMessageSendException;
-import com.ktb4.team16.mulo.chat.exception.ChatRoomAccessException;
+import com.ktb4.team16.mulo.chat.exception.ChatSendDiagnostic;
 import com.ktb4.team16.mulo.chat.moderation.client.ChatModerationClient;
 import com.ktb4.team16.mulo.chat.moderation.client.ChatModerationUnavailableException;
 import com.ktb4.team16.mulo.chat.moderation.service.ChatMessageWordFilter;
@@ -195,8 +195,12 @@ class ChatMessageSendServiceTest {
         assertThatThrownBy(() -> sendService.send(
                 CHAT_ROOM_ID, SENDER_ID, new ChatMessageSendRequest(clientMessageId, "안녕하세요")))
                 .isInstanceOf(ChatMessageSendException.class)
-                .extracting(exception -> ((ChatMessageSendException) exception).getCode())
-                .isEqualTo("CHAT_SEND_FORBIDDEN");
+                .satisfies(exception -> {
+                    ChatMessageSendException sendException = (ChatMessageSendException) exception;
+                    assertThat(sendException.getCode()).isEqualTo("CHAT_SEND_FORBIDDEN");
+                    assertThat(sendException.getDiagnostic().stage()).isEqualTo(ChatSendDiagnostic.Stage.TRANSACTION);
+                    assertThat(sendException.getDiagnostic().reason()).isEqualTo(ChatSendDiagnostic.Reason.PEER_NOT_ACTIVE);
+                });
 
         verify(messageRepository, never()).saveAndFlush(any(ChatMessage.class));
         verify(eventPublisher, never()).publishEvent(any());

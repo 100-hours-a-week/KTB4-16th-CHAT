@@ -3,6 +3,8 @@ package com.ktb4.team16.mulo.chat.service;
 import com.ktb4.team16.mulo.chat.dto.request.ChatMessageSendRequest;
 import com.ktb4.team16.mulo.chat.exception.ChatErrorCode;
 import com.ktb4.team16.mulo.chat.exception.ChatMessageSendException;
+import com.ktb4.team16.mulo.chat.exception.ChatSendAccessException;
+import com.ktb4.team16.mulo.chat.exception.ChatSendDiagnostic;
 import com.ktb4.team16.mulo.chat.exception.ChatRoomAccessException;
 import com.ktb4.team16.mulo.chat.moderation.client.ChatModerationClient;
 import com.ktb4.team16.mulo.chat.moderation.client.ChatModerationUnavailableException;
@@ -40,9 +42,12 @@ public class ChatMessageSendService {
 
     public void send(Long chatRoomId, Long userId, ChatMessageSendRequest request) {
         if (chatRoomId == null || chatRoomId <= 0) {
+            ChatSendDiagnostic diagnostic = new ChatSendDiagnostic(
+                    ChatSendDiagnostic.Stage.PRECHECK, ChatSendDiagnostic.Reason.INVALID_CHAT_ROOM_ID);
             ChatSendDiagnosticLogger.warn(log, chatRoomId, userId, request.clientMessageId(),
                     "precheck", "INVALID_CHAT_ROOM_ID", null);
-            throw new ChatMessageSendException(ChatErrorCode.CHAT_SEND_FORBIDDEN, request.clientMessageId());
+            throw new ChatMessageSendException(
+                    ChatErrorCode.CHAT_SEND_FORBIDDEN, request.clientMessageId(), diagnostic);
         }
         try {
             boolean requiresModeration = precheckService.requiresModeration(chatRoomId, userId, request);
@@ -62,10 +67,11 @@ public class ChatMessageSendService {
         } catch (ChatModerationUnavailableException exception) {
             throw new ChatMessageSendException(ChatErrorCode.MODERATION_UNAVAILABLE, request.clientMessageId());
         } catch (ChatRoomAccessException exception) {
-            if (exception.getReason() == ChatRoomAccessException.Reason.ROOM_EXPIRED) {
-                throw new ChatMessageSendException(ChatErrorCode.CHAT_ROOM_EXPIRED, request.clientMessageId());
-            }
-            throw new ChatMessageSendException(ChatErrorCode.CHAT_SEND_FORBIDDEN, request.clientMessageId());
+            ChatErrorCode errorCode = exception.getReason() == ChatRoomAccessException.Reason.ROOM_EXPIRED
+                    ? ChatErrorCode.CHAT_ROOM_EXPIRED : ChatErrorCode.CHAT_SEND_FORBIDDEN;
+            ChatSendDiagnostic diagnostic = exception instanceof ChatSendAccessException sendAccessException
+                    ? sendAccessException.getDiagnostic() : null;
+            throw new ChatMessageSendException(errorCode, request.clientMessageId(), diagnostic);
         } catch (DataIntegrityViolationException exception) {
             idempotencyResolver.resolveUniqueConflict(chatRoomId, userId, request);
         } catch (DataAccessException exception) {

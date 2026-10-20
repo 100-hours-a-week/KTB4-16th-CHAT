@@ -75,6 +75,9 @@ jobs:
           CHAT_MODERATION_AI_BASE_URL=${{ secrets.CHAT_MODERATION_AI_BASE_URL_Develop }}
           # 모더레이션 호출이 AI 서버로 보내는 내부 인증 토큰 (AI 서버의 AI_INTERNAL_TOKEN과 같은 값)
           AI_INTERNAL_TOKEN=${{ secrets.AI_INTERNAL_TOKEN_Develop }}
+          # 개발 배포에서만 제한된 STOMP SEND 거부 사유를 응답한다. Secret이 아닌 배포 범위 표식이다.
+          CHAT_STOMP_SEND_DIAGNOSTICS_ENABLED=true
+          CHAT_DEPLOYMENT_ENVIRONMENT=development
           # 컨테이너 JVM 기본 시간대가 UTC라 DB의 KST 값을 9시간 밀려서 읽는 문제를 막기 위해
           # JVM 기본시간대를 앱이 쓰는 Asia/Seoul로 맞춘다.
           JAVA_TOOL_OPTIONS=-Duser.timezone=Asia/Seoul
