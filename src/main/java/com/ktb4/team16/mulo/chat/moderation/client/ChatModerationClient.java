@@ -50,6 +50,7 @@ public class ChatModerationClient {
                     .timeout(properties.responseTimeout())
                     .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                     .header(HttpHeaders.ACCEPT, MediaType.APPLICATION_JSON_VALUE)
+                    .header("X-Internal-Token", properties.internalToken())
                     .POST(HttpRequest.BodyPublishers.ofString(
                             objectMapper.writeValueAsString(request), StandardCharsets.UTF_8))
                     .build();

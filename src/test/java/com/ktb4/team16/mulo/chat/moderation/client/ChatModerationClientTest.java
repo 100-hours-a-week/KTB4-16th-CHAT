@@ -22,6 +22,7 @@ class ChatModerationClientTest {
 
     private HttpServer server;
     private AtomicInteger requestCount;
+    private AtomicReference<String> suppliedToken;
 
     @AfterEach
     void stopServer() {
@@ -34,6 +35,7 @@ class ChatModerationClientTest {
     @DisplayName("요청 ID와 문자열 식별자를 전달하고 AI의 isToxic 판정을 사용한다")
     void sendsContractPayloadAndReturnsToxicFlag() throws IOException {
         AtomicReference<String> requestBody = new AtomicReference<>();
+        suppliedToken = new AtomicReference<>();
         startServer(200, requestBody, false, false, false);
 
         boolean toxic = client(server.getAddress().getPort()).isToxic(23L, 17L, "원문 메시지");
@@ -44,6 +46,7 @@ class ChatModerationClientTest {
         assertThat(request.path("roomId").asText()).isEqualTo("23");
         assertThat(request.path("userId").asText()).isEqualTo("17");
         assertThat(request.path("text").asText()).isEqualTo("원문 메시지");
+        assertThat(suppliedToken.get()).isEqualTo("test-ai-internal-token");
     }
 
     @Test
@@ -103,13 +106,38 @@ class ChatModerationClientTest {
     @Test
     @DisplayName("AI 주소 설정이 없으면 요청을 보내지 않고 fail-safe 처리한다")
     void failsClosedWhenBaseUrlIsMissing() {
-        ChatModerationProperties properties = new ChatModerationProperties("", Duration.ofSeconds(1),
-                Duration.ofSeconds(1));
+        ChatModerationProperties properties = new ChatModerationProperties(
+                "", "test-ai-internal-token", Duration.ofSeconds(1), Duration.ofSeconds(1));
         ChatModerationClient client = new ChatModerationClient(HttpClient.newHttpClient(), properties,
                 new ObjectMapper());
 
         assertThatThrownBy(() -> client.isToxic(23L, 17L, "본문"))
                 .isInstanceOf(ChatModerationUnavailableException.class);
+    }
+
+    @Test
+    @DisplayName("AI 인증 토큰이 없으면 인증 없는 요청을 보내지 않고 차단한다")
+    void failsClosedWhenInternalTokenIsMissing() throws IOException {
+        startServer(200, new AtomicReference<>(), false, false, false);
+        ChatModerationClient client = new ChatModerationClient(HttpClient.newHttpClient(),
+                new ChatModerationProperties(
+                        "http://127.0.0.1:" + server.getAddress().getPort(), " ",
+                        Duration.ofSeconds(1), Duration.ofSeconds(1)),
+                new ObjectMapper());
+
+        assertThatThrownBy(() -> client.isToxic(23L, 17L, "본문"))
+                .isInstanceOf(ChatModerationUnavailableException.class);
+        assertThat(requestCount.get()).isZero();
+    }
+
+    @Test
+    @DisplayName("AI 인증 거부는 fail-safe 차단으로 처리한다")
+    void failsClosedWhenAiAuthenticationIsRejected() throws IOException {
+        startServer(401, new AtomicReference<>(), false, false, false);
+
+        assertThatThrownBy(() -> client(server.getAddress().getPort()).isToxic(23L, 17L, "본문"))
+                .isInstanceOf(ChatModerationUnavailableException.class);
+        assertThat(requestCount.get()).isEqualTo(1);
     }
 
     @Test
@@ -122,8 +150,10 @@ class ChatModerationClientTest {
     private ChatModerationClient client(int port) {
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(1)).build();
         return new ChatModerationClient(httpClient,
-                new ChatModerationProperties("http://127.0.0.1:" + port, Duration.ofSeconds(1),
-                        Duration.ofSeconds(1)), new ObjectMapper());
+                new ChatModerationProperties(
+                        "http://127.0.0.1:" + port, "test-ai-internal-token",
+                        Duration.ofSeconds(1), Duration.ofSeconds(1)),
+                new ObjectMapper());
     }
 
     private void startServer(int status, AtomicReference<String> requestBody,
@@ -137,6 +167,9 @@ class ChatModerationClientTest {
         }));
         server.createContext("/api/moderation/check", exchange -> {
             requestCount.incrementAndGet();
+            if (suppliedToken != null) {
+                suppliedToken.set(exchange.getRequestHeaders().getFirst("X-Internal-Token"));
+            }
             requestBody.set(new String(exchange.getRequestBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
             if (delay) {
                 try {
