@@ -10,11 +10,15 @@ import com.ktb4.team16.mulo.chat.repository.ChatMessageRepository;
 import com.ktb4.team16.mulo.chat.repository.ChatRoomParticipantRepository;
 import java.util.List;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class ChatMessageSendPrecheckService {
+
+    private static final Logger log = LoggerFactory.getLogger(ChatMessageSendPrecheckService.class);
 
     private final ChatRoomAccessService chatRoomAccessService;
     private final ChatRoomParticipantRepository participantRepository;
@@ -35,20 +39,44 @@ public class ChatMessageSendPrecheckService {
      */
     @Transactional(readOnly = true)
     public boolean requiresModeration(Long chatRoomId, Long userId, ChatMessageSendRequest request) {
-        ChatRoom room = chatRoomAccessService.findRoom(chatRoomId);
+        ChatRoom room;
+        try {
+            room = chatRoomAccessService.findRoom(chatRoomId);
+        } catch (ChatRoomAccessException exception) {
+            String reason = exception.getReason() == ChatRoomAccessException.Reason.ROOM_NOT_FOUND
+                    ? "ROOM_NOT_FOUND" : "ACCESS_" + exception.getReason().name();
+            logDenied(chatRoomId, userId, request, reason, null);
+            throw exception;
+        }
         List<ChatRoomParticipant> participants = participantRepository.findAllByChatRoomChatRoomId(chatRoomId);
         if (participants.size() != 2) {
+            logDenied(chatRoomId, userId, request, "PARTICIPANT_COUNT_MISMATCH", participants);
             throw new ChatRoomAccessException(ChatRoomAccessException.Reason.PARTICIPANT_NOT_FOUND);
         }
 
         ChatRoomParticipant sender = participants.stream()
                 .filter(participant -> participant.getUserId().equals(userId))
                 .findFirst()
-                .orElseThrow(() -> new ChatRoomAccessException(
-                        ChatRoomAccessException.Reason.PARTICIPANT_NOT_FOUND));
-        chatRoomAccessService.rejectExpired(room);
-        chatRoomAccessService.requireActiveParticipant(sender);
+                .orElse(null);
+        if (sender == null) {
+            logDenied(chatRoomId, userId, request, "SENDER_NOT_FOUND", participants);
+            throw new ChatRoomAccessException(ChatRoomAccessException.Reason.PARTICIPANT_NOT_FOUND);
+        }
+        try {
+            chatRoomAccessService.rejectExpired(room);
+        } catch (ChatRoomAccessException exception) {
+            logDenied(chatRoomId, userId, request, "ROOM_EXPIRED", participants);
+            throw exception;
+        }
+        try {
+            chatRoomAccessService.requireActiveParticipant(sender);
+        } catch (ChatRoomAccessException exception) {
+            String reason = sender.getLeftAt() != null ? "SENDER_LEFT" : "SENDER_NOT_JOINED";
+            logDenied(chatRoomId, userId, request, reason, participants);
+            throw exception;
+        }
         if (participants.stream().anyMatch(participant -> !chatRoomAccessService.isActiveParticipant(participant))) {
+            logDenied(chatRoomId, userId, request, "PEER_NOT_ACTIVE", participants);
             throw new ChatRoomAccessException(ChatRoomAccessException.Reason.PARTICIPANT_LEFT);
         }
 
@@ -64,5 +92,16 @@ public class ChatMessageSendPrecheckService {
             throw ChatMessageSendException.conflict(request.clientMessageId());
         }
         return false;
+    }
+
+    private void logDenied(
+            Long chatRoomId,
+            Long userId,
+            ChatMessageSendRequest request,
+            String reason,
+            List<ChatRoomParticipant> participants
+    ) {
+        ChatSendDiagnosticLogger.warn(log, chatRoomId, userId,
+                request == null ? null : request.clientMessageId(), "precheck", reason, participants);
     }
 }
