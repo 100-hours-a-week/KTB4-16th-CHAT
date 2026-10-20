@@ -1,6 +1,7 @@
 package com.ktb4.team16.mulo.chat.controller;
 
 import com.ktb4.team16.mulo.chat.auth.security.ChatPrincipal;
+import com.ktb4.team16.mulo.chat.config.ChatSendDiagnosticAvailability;
 import com.ktb4.team16.mulo.chat.dto.request.ChatMessageSendRequest;
 import com.ktb4.team16.mulo.chat.dto.response.ChatMessageErrorResponse;
 import com.ktb4.team16.mulo.chat.exception.ChatErrorCode;
@@ -30,9 +31,14 @@ public class ChatMessageStompController {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final ChatMessageSendService chatMessageSendService;
+    private final ChatSendDiagnosticAvailability diagnosticAvailability;
 
-    public ChatMessageStompController(ChatMessageSendService chatMessageSendService) {
+    public ChatMessageStompController(
+            ChatMessageSendService chatMessageSendService,
+            ChatSendDiagnosticAvailability diagnosticAvailability
+    ) {
         this.chatMessageSendService = chatMessageSendService;
+        this.diagnosticAvailability = diagnosticAvailability;
     }
 
     @MessageMapping("/chat-rooms/{chatRoomId}/messages")
@@ -49,7 +55,10 @@ public class ChatMessageStompController {
     public ChatMessageErrorResponse handleSendError(Exception exception) {
         if (exception instanceof ChatMessageSendException sendException) {
             return new ChatMessageErrorResponse(
-                    sendException.getCode(), sendException.getMessage(), sendException.getClientMessageId());
+                    sendException.getCode(),
+                    sendException.getMessage(),
+                    sendException.getClientMessageId(),
+                    debugDetails(sendException));
         }
         if (exception instanceof MethodArgumentNotValidException validationException) {
             UUID clientMessageId = extractClientMessageId(validationException);
@@ -92,5 +101,15 @@ public class ChatMessageStompController {
         } catch (RuntimeException parseException) {
             return null;
         }
+    }
+
+    private ChatMessageErrorResponse.Debug debugDetails(ChatMessageSendException exception) {
+        if (!diagnosticAvailability.enabled()
+                || !ChatErrorCode.CHAT_SEND_FORBIDDEN.code().equals(exception.getCode())
+                || exception.getDiagnostic() == null) {
+            return null;
+        }
+        return new ChatMessageErrorResponse.Debug(
+                exception.getDiagnostic().stage().value(), exception.getDiagnostic().reason().name());
     }
 }
