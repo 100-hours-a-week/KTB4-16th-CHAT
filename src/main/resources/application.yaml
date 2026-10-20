@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: mulo-chat
+  datasource:
+    url: ${CHAT_DB_URL}
+    username: ${CHAT_DB_USERNAME}
+    password: ${CHAT_DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+
+chat:
+  websocket:
+    allowed-origins: ${CHAT_WS_ALLOWED_ORIGINS:}
+  auth:
+    backend:
+      url: ${CHAT_BACKEND_URL:}
+      internal-api-key: ${CHAT_INTERNAL_API_KEY:}
+      connect-timeout: ${CHAT_AUTH_CONNECT_TIMEOUT:2s}
+      response-timeout: ${CHAT_AUTH_RESPONSE_TIMEOUT:3s}
+  moderation:
+    ai:
+      base-url: ${CHAT_MODERATION_AI_BASE_URL:}
+      internal-token: ${AI_INTERNAL_TOKEN:}
+      connect-timeout: ${CHAT_MODERATION_AI_CONNECT_TIMEOUT:1s}
+      response-timeout: ${CHAT_MODERATION_AI_RESPONSE_TIMEOUT:1s}
+
+server:
+  port: 8081

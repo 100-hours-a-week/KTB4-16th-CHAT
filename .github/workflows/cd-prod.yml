@@ -1,0 +1,295 @@
+name: Chat CD prod
+
+# CI prod가 main에서 성공적으로 끝나면 자동으로 시작한다. (production 승인자가 승인해야 배포가 진행된다)
+# 새 이미지가 없어서 지금 운영 중인 태그와 같으면 배포하지 않고 건너뛴다.
+# workflow_dispatch는 특정 태그로 재배포하거나 이전 버전으로 되돌릴 때 수동으로 쓴다. (같은 태그여도 배포한다)
+on:
+  workflow_run:
+    workflows: ["Chat CI prod"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "배포할 이미지 태그 (비우면 가장 최근 태그)"
+        required: false
+        type: string
+
+env:
+  SERVICE: chat
+  MIG_NAME: mulo-v2-chat-mig
+  MIG_FLAG: "--zone=asia-northeast3-a"
+  MAX_SURGE: "1"
+  MAX_UNAVAILABLE: "0"
+  REPLACEMENT_METHOD: substitute
+
+jobs:
+  # ============================================================
+  # 1단계: 배포할 이미지 태그와 현재 인스턴스 템플릿을 확인한다. (VM은 건드리지 않는다)
+  # ============================================================
+  prepare:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # GCP WIF 인증용 OIDC 토큰 발급 권한
+    outputs:
+      image_tag: ${{ steps.image.outputs.tag }}
+      deploy: ${{ steps.compare.outputs.deploy }}
+    steps:
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      # 이미지는 CD가 빌드하지 않고, CI가 push해둔 것을 그대로 쓴다.
+      # 수동 실행 때 태그를 넣으면 그 태그를, 비우면 가장 최근 태그를 쓴다.
+      - id: image
+        env:
+          INPUT_TAG: ${{ inputs.image_tag }}
+          IMAGE_REPO: ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.PROJECT_REPOSITORY }}/${{ secrets.IMAGE_NAME }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG=$(gcloud artifacts docker images list "$IMAGE_REPO" \
+              --include-tags --sort-by="~UPDATE_TIME" \
+              --format="value(TAGS)" | tr ',' '\n' | grep -m1 -E '^[0-9]+\.[0-9]+\.[0-9]+$' || true)
+          fi
+          if [ -z "$TAG" ]; then
+            echo "배포할 이미지 태그를 찾을 수 없습니다."
+            exit 1
+          fi
+          # 해당 태그의 이미지가 실제로 있는지 확인한다.
+          gcloud artifacts docker images describe "$IMAGE_REPO:$TAG" > /dev/null
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      # 자동 실행(workflow_run)일 때 지금 운영 중인 태그와 같으면 배포하지 않는다. (새 이미지가 안 생긴 머지)
+      # 수동 실행은 같은 태그여도 항상 배포한다.
+      - id: compare
+        env:
+          TAG: ${{ steps.image.outputs.tag }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          CURRENT=$(gcloud compute instance-groups managed describe "$MIG_NAME" $MIG_FLAG \
+            --format="value(versions[0].instanceTemplate.basename())")
+          CURRENT_TAG=$(gcloud compute instance-templates describe "$CURRENT" --format=json \
+            | python3 -c "import sys,json; print(next((i['value'] for i in json.load(sys.stdin)['properties']['metadata'].get('items', []) if i['key'] == 'app-image-tag'), ''))")
+          echo "현재 운영 태그: $CURRENT_TAG, 배포할 태그: $TAG"
+          if [ "$CURRENT_TAG" = "$TAG" ]; then
+            echo "같은 태그라서 배포를 건너뜁니다."
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout notify action
+        if: ${{ failure() }}
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/actions
+          sparse-checkout-cone-mode: false
+      - name: Notify result
+        if: ${{ failure() }}
+        uses: ./.github/actions/notify-discord
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          title: "Chat 배포 준비"
+          status: ${{ job.status }}
+          description: "이미지 태그: ${{ steps.image.outputs.tag }}"
+
+  # ============================================================
+  # 2단계: 새 인스턴스 템플릿을 만들고 MIG를 교체한다.
+  # environment: production 에 지정한 승인자가 승인해야 시작한다.
+  # ============================================================
+  rolling-update:
+    needs: prepare
+    if: ${{ needs.prepare.outputs.deploy == 'true' }}
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: cd-chat-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      TAG: ${{ needs.prepare.outputs.image_tag }}
+    steps:
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      # 현재 MIG가 쓰는 템플릿(롤백 때 되돌아갈 템플릿)과 새 템플릿 이름을 정한다.
+      # 이 값에는 시크릿 값(서비스 이름 등)이 섞여 있어서 job output으로 넘기면 GitHub이 버린다.
+      # 그래서 이 job 안에서 만들어 환경변수로 쓴다.
+      - name: Resolve templates
+        run: |
+          PREV=$(gcloud compute instance-groups managed describe "$MIG_NAME" $MIG_FLAG \
+            --format="value(versions[0].instanceTemplate.basename())")
+          if [ -z "$PREV" ]; then
+            echo "$MIG_NAME 의 현재 인스턴스 템플릿을 찾을 수 없습니다."
+            exit 1
+          fi
+          SAFE=$(echo "$TAG" | tr '[:upper:]' '[:lower:]' | tr -c 'a-z0-9\n' '-' | sed 's/-*$//')
+          echo "PREV_TEMPLATE=$PREV" >> "$GITHUB_ENV"
+          echo "NEW_TEMPLATE=${SERVICE}-tpl-${SAFE}-${{ github.run_number }}" >> "$GITHUB_ENV"
+
+      # 현재 템플릿을 그대로 복제하고 이미지 태그 메타데이터(app-image-tag)만 바꾼 새 템플릿을 만든다. (chat 첫 배포는 app-image도 추가)
+      # gcloud compute instance-templates create에는 기존 템플릿을 복사하는 옵션이 없어서
+      # 현재 템플릿을 읽어 메타데이터만 바꾼 뒤 Compute API로 새 템플릿을 만든다.
+      # 이미지 경로(app-image), 부팅 스크립트, env 시크릿 이름 등 나머지는 그대로다.
+      # VM은 부팅할 때 app-image:app-image-tag 이미지를 받아서 실행한다.
+      - name: Create instance template
+        env:
+          IMAGE_REPO: ${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.PROJECT_REPOSITORY }}/${{ secrets.IMAGE_NAME }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, sys, time, urllib.error, urllib.request
+
+          prev_name, new_name, tag = os.environ["PREV_TEMPLATE"], os.environ["NEW_TEMPLATE"], os.environ["TAG"]
+
+          def gcloud(*args):
+              return subprocess.check_output(["gcloud", *args], text=True).strip()
+
+          project = gcloud("config", "get-value", "project")
+          body = json.loads(gcloud("compute", "instance-templates", "describe", prev_name, "--format=json"))
+          for key in ("id", "kind", "selfLink", "selfLinkWithId", "creationTimestamp"):
+              body.pop(key, None)
+          body["name"] = new_name
+          metadata = body["properties"]["metadata"]
+          metadata.pop("fingerprint", None)
+          metadata.pop("kind", None)
+          items = [i for i in metadata["items"] if i["key"] != "app-image-tag"]
+          items.append({"key": "app-image-tag", "value": tag})
+          # chat의 첫 배포: 현재 템플릿에 app-image가 없으면 이미지 경로를 함께 넣는다.
+          # 이미 있으면 그대로 둔다. (Terraform이 이미지 경로를 관리하게 된 뒤에는 이 분기를 타지 않는다)
+          if not any(i["key"] == "app-image" for i in items):
+              items.append({"key": "app-image", "value": os.environ["IMAGE_REPO"]})
+              print("현재 템플릿에 app-image가 없어 이미지 경로를 추가합니다.")
+          metadata["items"] = items
+
+          req = urllib.request.Request(
+              f"https://compute.googleapis.com/compute/v1/projects/{project}/global/instanceTemplates",
+              data=json.dumps(body).encode(),
+              headers={"Authorization": "Bearer " + gcloud("auth", "print-access-token"),
+                       "Content-Type": "application/json"},
+              method="POST")
+          try:
+              op = json.load(urllib.request.urlopen(req))
+          except urllib.error.HTTPError as e:
+              sys.exit(f"템플릿 생성 요청 실패: {e.code} {e.read().decode()[:500]}")
+          # 작업이 끝날 때까지 기다린다.
+          for _ in range(60):
+              if op.get("status") == "DONE":
+                  break
+              time.sleep(2)
+              poll = urllib.request.Request(op["selfLink"], headers={"Authorization": "Bearer " + gcloud("auth", "print-access-token")})
+              op = json.load(urllib.request.urlopen(poll))
+          if op.get("status") != "DONE" or op.get("error"):
+              sys.exit(f"템플릿 생성 작업 실패: {json.dumps(op.get('error', op.get('status')))[:500]}")
+          print(f"새 템플릿 {new_name} 생성 완료 (app-image-tag={tag})")
+          PY
+
+      # 새 템플릿이 태그만 바뀌고 나머지 설정은 그대로인지 확인한다. 아니면 교체를 시작하지 않는다.
+      - name: Verify instance template
+        run: |
+          gcloud compute instance-templates describe "$PREV_TEMPLATE" --format=json > prev.json
+          gcloud compute instance-templates describe "$NEW_TEMPLATE" --format=json > new.json
+          python3 - <<'PY'
+          import json, os, sys
+          def meta(f):
+              items = json.load(open(f))["properties"]["metadata"].get("items", [])
+              return {i["key"]: i["value"] for i in items}
+          prev, new = meta("prev.json"), meta("new.json")
+          diff = sorted(k for k in set(prev) | set(new) if prev.get(k) != new.get(k))
+          print("바뀐 메타데이터 키:", diff)
+          allowed = {"app-image-tag"}
+          if "app-image" not in prev:
+              allowed.add("app-image")   # 첫 배포에서만 이미지 경로가 추가된다
+          if any(k not in allowed for k in diff):
+              sys.exit("태그 외의 설정이 달라졌습니다. 새 템플릿을 확인하세요.")
+          if new.get("app-image-tag") != os.environ["TAG"]:
+              sys.exit("새 템플릿의 app-image-tag가 배포할 태그와 다릅니다.")
+          if not new.get("startup-script") or not new.get("app-image"):
+              sys.exit("새 템플릿에 부팅 스크립트나 app-image가 없습니다.")
+          print("새 템플릿 확인 완료")
+          PY
+
+      - id: start
+        name: Start rolling update
+        run: |
+          gcloud compute instance-groups managed rolling-action start-update "$MIG_NAME" $MIG_FLAG \
+            --version=template="$NEW_TEMPLATE" \
+            --type=proactive \
+            --minimal-action=replace \
+            --most-disruptive-allowed-action=replace \
+            --replacement-method="$REPLACEMENT_METHOD" \
+            --max-surge="$MAX_SURGE" \
+            --max-unavailable="$MAX_UNAVAILABLE"
+
+      # 모든 VM이 새 템플릿으로 교체되고 헬스체크를 통과할 때까지 기다린다.
+      - name: Wait until all instances are updated
+        run: |
+          gcloud compute instance-groups managed wait-until "$MIG_NAME" $MIG_FLAG \
+            --version-target-reached --timeout=1800
+
+      - name: Wait until the group is stable
+        run: |
+          gcloud compute instance-groups managed wait-until "$MIG_NAME" $MIG_FLAG \
+            --stable --timeout=600
+
+      # 교체 도중 실패하면 이전 템플릿으로 되돌린다. (교체를 시작한 경우에만)
+      - name: Rollback to previous template
+        if: ${{ failure() && steps.start.outcome == 'success' }}
+        run: |
+          gcloud compute instance-groups managed rolling-action start-update "$MIG_NAME" $MIG_FLAG \
+            --version=template="$PREV_TEMPLATE" \
+            --type=proactive \
+            --minimal-action=replace \
+            --most-disruptive-allowed-action=replace \
+            --replacement-method="$REPLACEMENT_METHOD" \
+            --max-surge="$MAX_SURGE" \
+            --max-unavailable="$MAX_UNAVAILABLE"
+          gcloud compute instance-groups managed wait-until "$MIG_NAME" $MIG_FLAG \
+            --version-target-reached --timeout=1800
+
+      # 오래된 템플릿은 최근 5개만 남기고 지운다. (사용 중인 템플릿은 삭제되지 않는다)
+      - name: Delete old instance templates
+        if: ${{ success() }}
+        continue-on-error: true
+        run: |
+          gcloud compute instance-templates list \
+            --filter="name~^${SERVICE}-tpl-" \
+            --sort-by="~creationTimestamp" \
+            --format="value(name)" \
+            | tail -n +6 \
+            | while read -r T; do
+                gcloud compute instance-templates delete "$T" --quiet || true
+              done
+
+      - name: Checkout notify action
+        if: ${{ always() }}
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/actions
+          sparse-checkout-cone-mode: false
+      - name: Notify result
+        if: ${{ always() }}
+        uses: ./.github/actions/notify-discord
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          title: "Chat 배포"
+          status: ${{ job.status }}
+          description: "이미지 태그: ${{ needs.prepare.outputs.image_tag }}"

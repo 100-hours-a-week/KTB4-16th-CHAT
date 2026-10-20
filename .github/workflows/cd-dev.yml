@@ -1,0 +1,144 @@
+name: Chat CD dev
+
+# develop CI(ci-dev.yml)가 성공하면 자동으로 개발 서버에 배포한다.
+# workflow_dispatch는 개발 서버에 다시 배포하고 싶을 때 수동으로 쓴다.
+# 주의: workflow_run으로 실행되는 워크플로는 기본 브랜치(main)에 있는 파일 기준으로 실행된다.
+on:
+  workflow_run:
+    workflows: ["Chat CI dev"]
+    types: [completed]
+    branches: [develop]
+  workflow_dispatch:
+
+env:
+  ZONE: asia-northeast3-a
+  DEV_VM_NAME: mulo-v2-dev-vm   # Terraform이 만든 개발 VM 이름
+
+jobs:
+  deploy:
+    name: Deploy to Develop VM
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    concurrency:
+      group: cd-chat-develop
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write   # GCP WIF 인증용 OIDC 토큰 발급 권한
+    outputs:
+      vm: ${{ steps.develop.outputs.vm }}
+
+    steps:
+      # WIF로 GCP 서비스 계정 인증 (키 파일 없이 임시 토큰 발급)
+      - id: auth
+        uses: google-github-actions/auth@v3
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID_Develop }}
+          workload_identity_provider: ${{ secrets.WORKLOAD_IDENTITY_PROVIDER_Develop }}
+          service_account: ${{ secrets.SERVICE_ACCOUNT_Develop }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      # 1. DEV_VM_NAME 이름의 개발 VM을 찾는다.
+      - id: develop
+        run: |
+          VM=$(gcloud compute instances list \
+            --filter="name=${{ env.DEV_VM_NAME }}" \
+            --zones="${{ env.ZONE }}" \
+            --format="value(name)")
+          if [ -z "$VM" ]; then
+            echo "${{ env.DEV_VM_NAME }} VM을 찾을 수 없습니다."
+            exit 1
+          fi
+          echo "vm=$VM" >> "$GITHUB_OUTPUT"
+
+      # 2. CI(semantic-release)가 방금 push한 이미지 중 가장 최근 태그를 조회한다.
+      #    CD는 이미지를 직접 빌드하지 않고, CI가 이미 push해둔 걸 그대로 가져다 쓴다.
+      - id: image
+        run: |
+          TAG=$(gcloud artifacts docker images list \
+            "${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID_Develop }}/${{ secrets.PROJECT_REPOSITORY }}/${{ secrets.IMAGE_NAME }}" \
+            --include-tags --sort-by="~UPDATE_TIME" \
+            --format="value(TAGS)" | tr ',' '\n' | grep -m1 '^dev-' || true)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      # 3. chat.env 파일을 GitHub Secrets 값으로 생성한다.
+      #    이 파일은 여기서만 잠깐 만들어지고, 실제 값은 워크플로 로그에 자동으로 마스킹된다.
+      - run: |
+          cat > chat.env <<ENVEOF
+          CHAT_DB_URL=${{ secrets.CHAT_DB_URL_Develop }}
+          CHAT_DB_USERNAME=${{ secrets.CHAT_DB_USERNAME_Develop }}
+          CHAT_DB_PASSWORD=${{ secrets.CHAT_DB_PASSWORD_Develop }}
+          CHAT_BACKEND_URL=${{ secrets.CHAT_BACKEND_URL_Develop }}
+          CHAT_INTERNAL_API_KEY=${{ secrets.CHAT_INTERNAL_API_KEY_Develop }}
+          CHAT_WS_ALLOWED_ORIGINS=${{ secrets.CHAT_WS_ALLOWED_ORIGINS_Develop }}
+          CHAT_MODERATION_AI_BASE_URL=${{ secrets.CHAT_MODERATION_AI_BASE_URL_Develop }}
+          # 모더레이션 호출이 AI 서버로 보내는 내부 인증 토큰 (AI 서버의 AI_INTERNAL_TOKEN과 같은 값)
+          AI_INTERNAL_TOKEN=${{ secrets.AI_INTERNAL_TOKEN_Develop }}
+          # 컨테이너 JVM 기본 시간대가 UTC라 DB의 KST 값을 9시간 밀려서 읽는 문제를 막기 위해
+          # JVM 기본시간대를 앱이 쓰는 Asia/Seoul로 맞춘다.
+          JAVA_TOOL_OPTIONS=-Duser.timezone=Asia/Seoul
+          ENVEOF
+
+      # 4. env 파일을 develop VM으로 전송하고, 새 이미지를 pull해서 chat 컨테이너만 교체한다.
+      #    같은 VM 위의 backend/frontend/ai/nginx 컨테이너는 건드리지 않는다.
+      - run: |
+          gcloud compute scp chat.env "${{ steps.develop.outputs.vm }}:~/app/chat.env" \
+            --zone="${{ env.ZONE }}" --tunnel-through-iap
+
+          gcloud compute ssh "${{ steps.develop.outputs.vm }}" \
+            --zone="${{ env.ZONE }}" --tunnel-through-iap --command="
+              set -e
+              sudo gcloud auth configure-docker '${{ secrets.GCP_REGION }}-docker.pkg.dev' --quiet
+              cd ~/app
+              export IMAGE_TAG=${{ steps.image.outputs.tag }}
+              export GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID_Develop }}
+              sudo --preserve-env=IMAGE_TAG,GCP_PROJECT_ID docker compose pull chat
+              sudo --preserve-env=IMAGE_TAG,GCP_PROJECT_ID docker compose up -d chat
+              # 쓰지 않는 옛 이미지를 지워서 개발 VM 디스크가 차는 것을 막는다. (실행 중인 컨테이너의 이미지는 남는다)
+              sudo docker image prune -af || true
+            "
+
+      # 5. 컨테이너가 healthy 상태가 될 때까지 대기 (비즈니스 로직 검증용 스모크 테스트는 아님).
+      #    이게 없으면 승인이 컨테이너 기동 완료 전에 빨리 눌렸을 때, 아직 준비 안 된
+      #    컨테이너로 바로 트래픽이 전환되어 502 다운타임이 생긴다. 최대 60초(3초 x 20회) 대기.
+      - name: "Wait for chat container to be healthy"
+        run: |
+          gcloud compute ssh "${{ steps.develop.outputs.vm }}" --zone="${{ env.ZONE }}" --tunnel-through-iap --command="
+            for i in \$(seq 1 20); do
+              status=\$(sudo docker inspect chat --format='{{.State.Health.Status}}')
+              if [ \"\$status\" = \"healthy\" ]; then
+                echo \"chat healthy (시도 \$i/20)\"
+                exit 0
+              fi
+              echo \"대기 중... (\$i/20) 현재 상태: \$status\"
+              sleep 3
+            done
+            echo \"chat이 60초 안에 healthy가 되지 않았습니다.\"
+            exit 1
+          "
+
+      # nginx는 컨테이너 DNS를 시작/리로드 시점에만 캐싱하므로, 방금 재생성된
+      # chat의 새 IP를 반영하도록 reload한다. 개발서버는 VM이 하나뿐이라
+      # 트래픽 전환 과정이 없어 이 단계가 빠져있었고, 그래서 이미지는 최신인데
+      # 실제로는 화면에 반영이 안 되는 문제가 있었다(2026-10-01 frontend에서 실제 발생).
+      - name: "Reload nginx to pick up new container IP"
+        run: |
+          gcloud compute ssh "${{ steps.develop.outputs.vm }}" --zone="${{ env.ZONE }}" --tunnel-through-iap --command="
+            sudo docker exec nginx nginx -s reload
+          "
+
+      - name: Checkout notify action
+        if: ${{ always() }}
+        uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/actions
+          sparse-checkout-cone-mode: false
+      - name: Notify result
+        if: ${{ always() }}
+        uses: ./.github/actions/notify-discord
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          title: "Chat Develop 배포"
+          status: ${{ job.status }}
+          description: "이미지 태그: ${{ steps.image.outputs.tag }}"
