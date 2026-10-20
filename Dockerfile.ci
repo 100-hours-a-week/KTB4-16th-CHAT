@@ -1,0 +1,14 @@
+# CI에서 만든 jar(build/libs/*.jar)를 그대로 복사하는 실행 전용 이미지.
+# 빌드는 CI의 bootJar 스텝에서 끝나므로 이 파일에는 빌드 스테이지가 없다.
+FROM eclipse-temurin:21-jre-noble AS runner
+
+WORKDIR /app
+
+RUN adduser --disabled-password --gecos "" springuser
+USER springuser
+
+COPY build/libs/*.jar app.jar
+
+EXPOSE 8081
+
+ENTRYPOINT ["java", "-jar", "app.jar"]

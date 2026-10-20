@@ -1,0 +1,21 @@
+{
+  "branches": ["develop"],
+  "tagFormat": "dev-v${version}",
+  "plugins": [
+    "@semantic-release/commit-analyzer",
+    "@semantic-release/release-notes-generator",
+    [
+      "@semantic-release/github",
+      {
+        "successComment": false,
+        "failComment": false
+      }
+    ],
+    [
+      "@semantic-release/exec",
+      {
+        "prepareCmd": "docker buildx build --platform linux/amd64 --cache-from type=registry,ref=$IMAGE_BASE-cache:build --cache-to type=registry,ref=$IMAGE_BASE-cache:build,mode=max --file Dockerfile.ci -t \"$IMAGE_BASE:dev-${nextRelease.version}\" --push ."
+      }
+    ]
+  ]
+}
