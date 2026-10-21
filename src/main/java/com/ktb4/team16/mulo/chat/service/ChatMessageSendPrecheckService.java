@@ -85,6 +85,16 @@ public class ChatMessageSendPrecheckService {
             logDenied(chatRoomId, userId, request, diagnostic.reason().name(), participants);
             throw new ChatSendAccessException(exception.getReason(), diagnostic);
         }
+        ChatRoomParticipant peerParticipant = participants.stream()
+                .filter(participant -> !participant.getUserId().equals(userId))
+                .findFirst()
+                .orElse(null);
+        if (isNotYetJoined(peerParticipant)) {
+            ChatSendDiagnostic diagnostic = diagnostic(
+                    ChatSendDiagnostic.Stage.PRECHECK, ChatSendDiagnostic.Reason.PEER_NOT_ACTIVE);
+            logDenied(chatRoomId, userId, request, diagnostic.reason().name(), participants);
+            throw new ChatSendAccessException(ChatRoomAccessException.Reason.PEER_NOT_JOINED, diagnostic);
+        }
         if (participants.stream().anyMatch(participant -> !chatRoomAccessService.isActiveParticipant(participant))) {
             ChatSendDiagnostic diagnostic = diagnostic(
                     ChatSendDiagnostic.Stage.PRECHECK, ChatSendDiagnostic.Reason.PEER_NOT_ACTIVE);
@@ -119,5 +129,9 @@ public class ChatMessageSendPrecheckService {
 
     private ChatSendDiagnostic diagnostic(ChatSendDiagnostic.Stage stage, ChatSendDiagnostic.Reason reason) {
         return new ChatSendDiagnostic(stage, reason);
+    }
+
+    private boolean isNotYetJoined(ChatRoomParticipant participant) {
+        return participant != null && participant.getJoinedAt() == null && participant.getLeftAt() == null;
     }
 }
