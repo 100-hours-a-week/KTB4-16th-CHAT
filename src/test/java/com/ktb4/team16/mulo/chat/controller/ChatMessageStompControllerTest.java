@@ -52,6 +52,21 @@ class ChatMessageStompControllerTest {
     }
 
     @Test
+    @DisplayName("상대방 미입장 오류는 요청 식별자를 포함한 별도 STOMP 오류로 전달한다")
+    void mapsPeerNotJoinedToStompErrorResponse() throws Exception {
+        UUID clientMessageId = UUID.randomUUID();
+
+        ChatMessageErrorResponse response = controller.handleSendError(
+                new ChatMessageSendException(ChatErrorCode.CHAT_PEER_NOT_JOINED, clientMessageId));
+
+        assertThat(response.code()).isEqualTo("CHAT_PEER_NOT_JOINED");
+        assertThat(response.message()).isEqualTo("상대방이 아직 채팅방에 입장하지 않았습니다.");
+        assertThat(response.clientMessageId()).isEqualTo(clientMessageId);
+        assertThat(response.debug()).isNull();
+        assertThat(new ObjectMapper().writeValueAsString(response)).doesNotContain("debug");
+    }
+
+    @Test
     @DisplayName("격리 개발 진단이 활성화되면 제한된 사유만 오류 응답에 포함한다")
     void includesDiagnosticDetailsWhenEnabled() throws Exception {
         UUID clientMessageId = UUID.randomUUID();

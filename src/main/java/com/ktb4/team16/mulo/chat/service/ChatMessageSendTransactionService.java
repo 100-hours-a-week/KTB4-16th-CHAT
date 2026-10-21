@@ -97,6 +97,17 @@ public class ChatMessageSendTransactionService {
             throw new ChatSendAccessException(exception.getReason(), diagnostic);
         }
 
+        ChatRoomParticipant peerParticipant = participants.stream()
+                .filter(participant -> !participant.getUserId().equals(userId))
+                .findFirst()
+                .orElse(null);
+        if (isNotYetJoined(peerParticipant)) {
+            ChatSendDiagnostic diagnostic = diagnostic(
+                    ChatSendDiagnostic.Stage.TRANSACTION, ChatSendDiagnostic.Reason.PEER_NOT_ACTIVE);
+            logDenied(chatRoomId, userId, request, diagnostic.reason().name(), participants);
+            throw new ChatSendAccessException(ChatRoomAccessException.Reason.PEER_NOT_JOINED, diagnostic);
+        }
+
         List<ChatRoomParticipant> activeParticipants = participants.stream()
                 .filter(chatRoomAccessService::isActiveParticipant)
                 .toList();
@@ -153,6 +164,10 @@ public class ChatMessageSendTransactionService {
 
     private ChatMessageSendException forbidden(ChatMessageSendRequest request, ChatSendDiagnostic diagnostic) {
         return new ChatMessageSendException(ChatErrorCode.CHAT_SEND_FORBIDDEN, request.clientMessageId(), diagnostic);
+    }
+
+    private boolean isNotYetJoined(ChatRoomParticipant participant) {
+        return participant != null && participant.getJoinedAt() == null && participant.getLeftAt() == null;
     }
 
     private ChatSendDiagnostic diagnostic(ChatSendDiagnostic.Stage stage, ChatSendDiagnostic.Reason reason) {

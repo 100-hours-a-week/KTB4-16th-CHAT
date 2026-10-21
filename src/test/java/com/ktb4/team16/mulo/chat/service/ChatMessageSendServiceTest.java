@@ -17,6 +17,8 @@ import com.ktb4.team16.mulo.chat.entity.ChatRoom;
 import com.ktb4.team16.mulo.chat.entity.ChatRoomParticipant;
 import com.ktb4.team16.mulo.chat.event.ChatMessageDeliveryEvent;
 import com.ktb4.team16.mulo.chat.exception.ChatMessageSendException;
+import com.ktb4.team16.mulo.chat.exception.ChatRoomAccessException;
+import com.ktb4.team16.mulo.chat.exception.ChatSendAccessException;
 import com.ktb4.team16.mulo.chat.exception.ChatSendDiagnostic;
 import com.ktb4.team16.mulo.chat.moderation.client.ChatModerationClient;
 import com.ktb4.team16.mulo.chat.moderation.client.ChatModerationUnavailableException;
@@ -187,8 +189,8 @@ class ChatMessageSendServiceTest {
     }
 
     @Test
-    @DisplayName("상대 참가자가 입장하지 않았거나 퇴장했으면 저장하지 않는다")
-    void rejectsWhenPeerIsNotActive() {
+    @DisplayName("상대방이 아직 입장하지 않았으면 별도 오류로 저장을 거부한다")
+    void rejectsWhenPeerHasNotJoinedYet() {
         when(peer.getJoinedAt()).thenReturn(null);
         UUID clientMessageId = UUID.randomUUID();
 
@@ -197,12 +199,38 @@ class ChatMessageSendServiceTest {
                 .isInstanceOf(ChatMessageSendException.class)
                 .satisfies(exception -> {
                     ChatMessageSendException sendException = (ChatMessageSendException) exception;
-                    assertThat(sendException.getCode()).isEqualTo("CHAT_SEND_FORBIDDEN");
+                    assertThat(sendException.getCode()).isEqualTo("CHAT_PEER_NOT_JOINED");
+                    assertThat(sendException.getMessage()).isEqualTo("상대방이 아직 채팅방에 입장하지 않았습니다.");
+                    assertThat(sendException.getClientMessageId()).isEqualTo(clientMessageId);
                     assertThat(sendException.getDiagnostic().stage()).isEqualTo(ChatSendDiagnostic.Stage.TRANSACTION);
                     assertThat(sendException.getDiagnostic().reason()).isEqualTo(ChatSendDiagnostic.Reason.PEER_NOT_ACTIVE);
                 });
 
         verify(messageRepository, never()).saveAndFlush(any(ChatMessage.class));
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    @DisplayName("선검사에서 확인된 상대방 미입장 오류를 같은 코드와 요청 식별자로 전달한다")
+    void mapsPrecheckPeerNotJoinedWithClientMessageId() {
+        UUID clientMessageId = UUID.randomUUID();
+        ChatMessageSendRequest request = new ChatMessageSendRequest(clientMessageId, "안녕하세요");
+        ChatSendDiagnostic diagnostic = new ChatSendDiagnostic(
+                ChatSendDiagnostic.Stage.PRECHECK, ChatSendDiagnostic.Reason.PEER_NOT_ACTIVE);
+        when(precheckService.requiresModeration(CHAT_ROOM_ID, SENDER_ID, request))
+                .thenThrow(new ChatSendAccessException(ChatRoomAccessException.Reason.PEER_NOT_JOINED, diagnostic));
+
+        assertThatThrownBy(() -> sendService.send(CHAT_ROOM_ID, SENDER_ID, request))
+                .isInstanceOf(ChatMessageSendException.class)
+                .satisfies(exception -> {
+                    ChatMessageSendException sendException = (ChatMessageSendException) exception;
+                    assertThat(sendException.getCode()).isEqualTo("CHAT_PEER_NOT_JOINED");
+                    assertThat(sendException.getClientMessageId()).isEqualTo(clientMessageId);
+                    assertThat(sendException.getDiagnostic()).isEqualTo(diagnostic);
+                });
+
+        verify(moderationClient, never()).isToxic(any(), any(), any());
+        verify(messageRepository, never()).saveAndFlush(any());
         verify(eventPublisher, never()).publishEvent(any());
     }
 
@@ -219,6 +247,24 @@ class ChatMessageSendServiceTest {
                 .isEqualTo("CHAT_SEND_FORBIDDEN");
 
         verify(messageRepository, never()).saveAndFlush(any(ChatMessage.class));
+    }
+
+    @Test
+    @DisplayName("채팅방 참가자가 아닌 발신자는 기존 권한 오류로 거부한다")
+    void rejectsSenderWhoIsNotParticipant() {
+        UUID clientMessageId = UUID.randomUUID();
+
+        assertThatThrownBy(() -> sendService.send(
+                CHAT_ROOM_ID, 99L, new ChatMessageSendRequest(clientMessageId, "안녕하세요")))
+                .isInstanceOf(ChatMessageSendException.class)
+                .satisfies(exception -> {
+                    ChatMessageSendException sendException = (ChatMessageSendException) exception;
+                    assertThat(sendException.getCode()).isEqualTo("CHAT_SEND_FORBIDDEN");
+                    assertThat(sendException.getClientMessageId()).isEqualTo(clientMessageId);
+                });
+
+        verify(messageRepository, never()).saveAndFlush(any(ChatMessage.class));
+        verify(eventPublisher, never()).publishEvent(any());
     }
 
     @Test
