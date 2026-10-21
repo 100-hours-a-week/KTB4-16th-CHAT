@@ -100,6 +100,33 @@ class ChatMessageSendPrecheckServiceTest {
                 });
     }
 
+    @Test
+    @DisplayName("그룹방은 참가자 총원이 둘보다 많아도 활성 참가자가 둘이면 선검사를 통과한다")
+    void allowsGroupRoomWhenAtLeastTwoParticipantsAreActive() {
+        ChatRoomParticipant third = participant(39L, false);
+        when(room.getRoomType()).thenReturn(ChatRoom.GROUP_ROOM_TYPE);
+        when(participantRepository.findAllByChatRoomChatRoomId(ROOM_ID)).thenReturn(List.of(sender, peer, third));
+        when(accessService.isActiveParticipant(third)).thenReturn(false);
+
+        assertThat(service.requiresModeration(ROOM_ID, SENDER_ID, request("본문"))).isTrue();
+    }
+
+    @Test
+    @DisplayName("그룹방에서 발신자 외 활성 참가자가 없으면 선검사에서 거부한다")
+    void rejectsGroupRoomWhenOnlySenderIsActive() {
+        ChatRoomParticipant inactivePeer = participant(PEER_ID, false);
+        when(room.getRoomType()).thenReturn(ChatRoom.GROUP_ROOM_TYPE);
+        when(participantRepository.findAllByChatRoomChatRoomId(ROOM_ID)).thenReturn(List.of(sender, inactivePeer));
+        when(accessService.isActiveParticipant(inactivePeer)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.requiresModeration(ROOM_ID, SENDER_ID, request("본문")))
+                .isInstanceOf(ChatSendAccessException.class)
+                .satisfies(exception -> {
+                    ChatSendDiagnostic diagnostic = ((ChatSendAccessException) exception).getDiagnostic();
+                    assertThat(diagnostic.reason()).isEqualTo(ChatSendDiagnostic.Reason.PEER_NOT_ACTIVE);
+                });
+    }
+
     private ChatMessageSendRequest request(String content) {
         return new ChatMessageSendRequest(UUID.fromString("00000000-0000-0000-0000-000000000001"), content);
     }

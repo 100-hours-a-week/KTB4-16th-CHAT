@@ -1,8 +1,11 @@
 package com.ktb4.team16.mulo.chat.controller;
 
 import com.ktb4.team16.mulo.chat.dto.request.CreateChatRoomRequest;
+import com.ktb4.team16.mulo.chat.dto.request.GroupChatJoinOrCreateRequest;
 import com.ktb4.team16.mulo.chat.dto.response.CreateChatRoomResponse;
+import com.ktb4.team16.mulo.chat.dto.response.GroupChatJoinOrCreateResponse;
 import com.ktb4.team16.mulo.chat.service.ChatRoomCreateService;
+import com.ktb4.team16.mulo.chat.service.GroupChatRoomJoinService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -16,14 +19,28 @@ import org.springframework.web.bind.annotation.RestController;
 public class InternalChatRoomController {
 
     private final ChatRoomCreateService chatRoomCreateService;
+    private final GroupChatRoomJoinService groupChatRoomJoinService;
 
-    public InternalChatRoomController(ChatRoomCreateService chatRoomCreateService) {
+    public InternalChatRoomController(
+            ChatRoomCreateService chatRoomCreateService,
+            GroupChatRoomJoinService groupChatRoomJoinService
+    ) {
         this.chatRoomCreateService = chatRoomCreateService;
+        this.groupChatRoomJoinService = groupChatRoomJoinService;
     }
 
     @PostMapping
     public ResponseEntity<CreateChatRoomResponse> create(@Valid @RequestBody CreateChatRoomRequest request) {
         ChatRoomCreateService.Result result = chatRoomCreateService.create(request);
+        return ResponseEntity.status(result.created() ? HttpStatus.CREATED : HttpStatus.OK)
+                .body(result.response());
+    }
+
+    @PostMapping("/group/join-or-create")
+    public ResponseEntity<GroupChatJoinOrCreateResponse> joinOrCreateGroup(
+            @Valid @RequestBody GroupChatJoinOrCreateRequest request
+    ) {
+        GroupChatRoomJoinService.Result result = groupChatRoomJoinService.joinOrCreate(request);
         return ResponseEntity.status(result.created() ? HttpStatus.CREATED : HttpStatus.OK)
                 .body(result.response());
     }

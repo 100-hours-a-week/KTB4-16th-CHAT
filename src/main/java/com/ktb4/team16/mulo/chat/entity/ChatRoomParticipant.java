@@ -13,14 +13,21 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 
 @Entity
 @Table(
         name = "chat_room_participants",
-        uniqueConstraints = @UniqueConstraint(
-                name = "uk_chat_room_participants_room_user",
-                columnNames = {"chat_room_id", "user_id"}
-        )
+        uniqueConstraints = {
+                @UniqueConstraint(
+                        name = "uk_chat_room_participants_room_user",
+                        columnNames = {"chat_room_id", "user_id"}
+                ),
+                @UniqueConstraint(
+                        name = "uk_chat_room_participants_group_date_user",
+                        columnNames = {"group_date", "user_id"}
+                )
+        }
 )
 public class ChatRoomParticipant {
 
@@ -43,6 +50,12 @@ public class ChatRoomParticipant {
     @Column(name = "nickname", nullable = false, length = 10)
     private String nickname;
 
+    @Column(name = "group_date")
+    private LocalDate groupDate;
+
+    @Column(name = "vote_choice", length = 1)
+    private String voteChoice;
+
     @Column(name = "joined_at")
     private LocalDateTime joinedAt;
 
@@ -60,6 +73,15 @@ public class ChatRoomParticipant {
 
     public static ChatRoomParticipant create(ChatRoom chatRoom, Long userId, String nickname) {
         return new ChatRoomParticipant(chatRoom, userId, nickname);
+    }
+
+    public static ChatRoomParticipant createGroup(
+            ChatRoom chatRoom, Long userId, String nickname, LocalDate groupDate, String voteChoice
+    ) {
+        ChatRoomParticipant participant = new ChatRoomParticipant(chatRoom, userId, nickname);
+        participant.groupDate = groupDate;
+        participant.voteChoice = voteChoice;
+        return participant;
     }
 
     public void enter() {
@@ -87,6 +109,10 @@ public class ChatRoomParticipant {
     public String getNickname() {
         return nickname;
     }
+
+    public LocalDate getGroupDate() { return groupDate; }
+
+    public String getVoteChoice() { return voteChoice; }
 
     public LocalDateTime getJoinedAt() {
         return joinedAt;

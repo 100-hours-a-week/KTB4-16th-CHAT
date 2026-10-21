@@ -11,7 +11,12 @@ public record ChatMessageHistoryResponse(List<Message> messages, String nextCurs
             Long userId,
             String nickname,
             String content,
-            OffsetDateTime createdAt
+            OffsetDateTime createdAt,
+            String voteChoice
     ) {
+        public Message(Long chatMessageId, String clientMessageId, Long userId, String nickname,
+                       String content, OffsetDateTime createdAt) {
+            this(chatMessageId, clientMessageId, userId, nickname, content, createdAt, null);
+        }
     }
 }

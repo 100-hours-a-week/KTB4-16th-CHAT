@@ -1,6 +1,7 @@
 package com.ktb4.team16.mulo.chat.service;
 
 import com.ktb4.team16.mulo.chat.dto.response.ChatParticipantLeftResponse;
+import com.ktb4.team16.mulo.chat.dto.response.ChatParticipantJoinedResponse;
 import com.ktb4.team16.mulo.chat.entity.ChatRoomParticipant;
 import com.ktb4.team16.mulo.chat.exception.ChatRoomAccessException;
 import com.ktb4.team16.mulo.chat.exception.ChatRoomAccessException.Reason;
@@ -30,6 +31,27 @@ public class ChatRoomEventDeliveryService {
             Long chatRoomId,
             Long recipientUserId,
             ChatParticipantLeftResponse response
+    ) {
+        ChatRoomParticipant recipient;
+        try {
+            recipient = accessService.findParticipantForUpdate(chatRoomId, recipientUserId);
+        } catch (ChatRoomAccessException exception) {
+            if (exception.getReason() == Reason.PARTICIPANT_NOT_FOUND) {
+                return;
+            }
+            throw exception;
+        }
+        if (!accessService.isActiveParticipant(recipient)) {
+            return;
+        }
+        messagingTemplate.convertAndSendToUser(recipientUserId.toString(), DESTINATION, response);
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void deliverParticipantJoinedIfActive(
+            Long chatRoomId,
+            Long recipientUserId,
+            ChatParticipantJoinedResponse response
     ) {
         ChatRoomParticipant recipient;
         try {
