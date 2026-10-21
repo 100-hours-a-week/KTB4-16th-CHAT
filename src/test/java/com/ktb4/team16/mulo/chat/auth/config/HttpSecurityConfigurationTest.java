@@ -14,6 +14,8 @@ import com.ktb4.team16.mulo.chat.auth.dto.BackendAuthResponse;
 import com.ktb4.team16.mulo.chat.auth.service.BackendTokenVerifier;
 import com.ktb4.team16.mulo.chat.dto.response.CreateChatRoomResponse;
 import com.ktb4.team16.mulo.chat.service.ChatRoomCreateService;
+import com.ktb4.team16.mulo.chat.dto.response.GroupChatJoinOrCreateResponse;
+import com.ktb4.team16.mulo.chat.service.GroupChatRoomJoinService;
 import java.time.OffsetDateTime;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,6 +40,9 @@ class HttpSecurityConfigurationTest {
 
     @MockitoBean
     private ChatRoomCreateService chatRoomCreateService;
+
+    @MockitoBean
+    private GroupChatRoomJoinService groupChatRoomJoinService;
 
     @Test
     void requiresBackendVerifiedBearerForChatRoomApi() throws Exception {
@@ -100,6 +105,28 @@ class HttpSecurityConfigurationTest {
                         .content("{\"matchId\":50,\"expiresAt\":\"2026-10-14T00:00:00+09:00\",\"participants\":[]}"))
                 .andExpect(status().isBadRequest());
         verifyNoInteractions(chatRoomCreateService);
+    }
+
+    @Test
+    void protectsGroupJoinOrCreateWithTheExistingInternalApiKey() throws Exception {
+        String request = """
+                {"groupDate":"2026-10-21","voteQuestionId":88,"userId":17,
+                 "nickname":"jettie","voteChoice":"A"}
+                """;
+        mockMvc.perform(post("/internal/chat-rooms/group/join-or-create")
+                        .contentType(APPLICATION_JSON).content(request))
+                .andExpect(status().isUnauthorized());
+        verifyNoInteractions(groupChatRoomJoinService);
+
+        when(groupChatRoomJoinService.joinOrCreate(any())).thenReturn(new GroupChatRoomJoinService.Result(
+                new GroupChatJoinOrCreateResponse(501L, 1, true, 1, 0,
+                        OffsetDateTime.parse("2026-10-22T00:00:00+09:00")), true));
+        mockMvc.perform(post("/internal/chat-rooms/group/join-or-create")
+                        .header("X-Internal-Api-Key", "test-internal-key")
+                        .contentType(APPLICATION_JSON).content(request))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.chatRoomId").value(501))
+                .andExpect(jsonPath("$.newlyAssigned").value(true));
     }
 
     @Test

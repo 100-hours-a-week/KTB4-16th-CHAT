@@ -51,7 +51,8 @@ public class ChatMessageSendPrecheckService {
             throw new ChatSendAccessException(exception.getReason(), diagnostic);
         }
         List<ChatRoomParticipant> participants = participantRepository.findAllByChatRoomChatRoomId(chatRoomId);
-        if (participants.size() != 2) {
+        boolean groupRoom = ChatRoom.GROUP_ROOM_TYPE.equals(room.getRoomType());
+        if (!groupRoom && participants.size() != 2) {
             ChatSendDiagnostic diagnostic = diagnostic(
                     ChatSendDiagnostic.Stage.PRECHECK, ChatSendDiagnostic.Reason.PARTICIPANT_COUNT_MISMATCH);
             logDenied(chatRoomId, userId, request, diagnostic.reason().name(), participants);
@@ -85,7 +86,10 @@ public class ChatMessageSendPrecheckService {
             logDenied(chatRoomId, userId, request, diagnostic.reason().name(), participants);
             throw new ChatSendAccessException(exception.getReason(), diagnostic);
         }
-        if (participants.stream().anyMatch(participant -> !chatRoomAccessService.isActiveParticipant(participant))) {
+        long activeParticipantCount = participants.stream()
+                .filter(chatRoomAccessService::isActiveParticipant)
+                .count();
+        if (groupRoom ? activeParticipantCount < 2 : activeParticipantCount != 2) {
             ChatSendDiagnostic diagnostic = diagnostic(
                     ChatSendDiagnostic.Stage.PRECHECK, ChatSendDiagnostic.Reason.PEER_NOT_ACTIVE);
             logDenied(chatRoomId, userId, request, diagnostic.reason().name(), participants);

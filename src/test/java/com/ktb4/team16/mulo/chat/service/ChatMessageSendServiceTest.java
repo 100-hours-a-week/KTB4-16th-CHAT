@@ -17,6 +17,7 @@ import com.ktb4.team16.mulo.chat.entity.ChatRoom;
 import com.ktb4.team16.mulo.chat.entity.ChatRoomParticipant;
 import com.ktb4.team16.mulo.chat.event.ChatMessageDeliveryEvent;
 import com.ktb4.team16.mulo.chat.exception.ChatMessageSendException;
+import com.ktb4.team16.mulo.chat.exception.ChatSendAccessException;
 import com.ktb4.team16.mulo.chat.exception.ChatSendDiagnostic;
 import com.ktb4.team16.mulo.chat.moderation.client.ChatModerationClient;
 import com.ktb4.team16.mulo.chat.moderation.client.ChatModerationUnavailableException;
@@ -204,6 +205,80 @@ class ChatMessageSendServiceTest {
 
         verify(messageRepository, never()).saveAndFlush(any(ChatMessage.class));
         verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    @DisplayName("그룹방은 일부 참가자가 퇴장해도 활성 참가자가 둘이면 메시지를 전달한다")
+    void deliversGroupMessageToAllActiveParticipantsIncludingSender() {
+        ChatRoomParticipant third = participant(39L, null, null);
+        when(room.getRoomType()).thenReturn(ChatRoom.GROUP_ROOM_TYPE);
+        when(participantRepository.findParticipantUserIdsByChatRoomIdOrderByUserId(CHAT_ROOM_ID))
+                .thenReturn(List.of(SENDER_ID, PEER_ID, 39L));
+        when(participantRepository.findByChatRoomChatRoomIdAndUserIdForUpdate(CHAT_ROOM_ID, 39L))
+                .thenReturn(Optional.of(third));
+        when(sender.getVoteChoice()).thenReturn("B");
+        UUID clientMessageId = UUID.randomUUID();
+        ChatMessageSendRequest request = new ChatMessageSendRequest(clientMessageId, "그룹 메시지");
+        when(messageRepository.findByUserIdAndClientMessageId(SENDER_ID, clientMessageId.toString()))
+                .thenReturn(Optional.empty());
+        when(messageRepository.saveAndFlush(any(ChatMessage.class))).thenReturn(savedMessage);
+        when(savedMessage.getChatMessageId()).thenReturn(101L);
+        when(savedMessage.getChatRoom()).thenReturn(room);
+        when(savedMessage.getUserId()).thenReturn(SENDER_ID);
+        when(savedMessage.getClientMessageId()).thenReturn(clientMessageId.toString());
+        when(savedMessage.getCreatedAt()).thenReturn(LocalDateTime.parse("2026-10-14T23:00:00"));
+
+        transactionService.send(CHAT_ROOM_ID, SENDER_ID, request);
+
+        ArgumentCaptor<ChatMessageDeliveryEvent> eventCaptor = ArgumentCaptor.forClass(ChatMessageDeliveryEvent.class);
+        verify(eventPublisher).publishEvent(eventCaptor.capture());
+        assertThat(eventCaptor.getValue().recipientUserIds()).containsExactly(SENDER_ID, PEER_ID);
+        assertThat(eventCaptor.getValue().response().voteChoice()).isEqualTo("B");
+    }
+
+    @Test
+    @DisplayName("그룹방은 활성 참가자가 발신자 한 명뿐이면 메시지를 저장하지 않는다")
+    void rejectsGroupMessageWhenOnlySenderIsActive() {
+        ChatRoomParticipant inactivePeer = participant(PEER_ID, null, null);
+        when(room.getRoomType()).thenReturn(ChatRoom.GROUP_ROOM_TYPE);
+        when(participantRepository.findParticipantUserIdsByChatRoomIdOrderByUserId(CHAT_ROOM_ID))
+                .thenReturn(List.of(SENDER_ID, PEER_ID));
+        when(participantRepository.findByChatRoomChatRoomIdAndUserIdForUpdate(CHAT_ROOM_ID, PEER_ID))
+                .thenReturn(Optional.of(inactivePeer));
+
+        assertThatThrownBy(() -> transactionService.send(CHAT_ROOM_ID, SENDER_ID,
+                new ChatMessageSendRequest(UUID.randomUUID(), "혼자 보내기")))
+                .isInstanceOf(ChatSendAccessException.class);
+        verify(messageRepository, never()).saveAndFlush(any(ChatMessage.class));
+        verify(eventPublisher, never()).publishEvent(any());
+    }
+
+    @Test
+    @DisplayName("그룹 메시지는 발신자를 포함한 활성 참가자 최대 30명에게 전달한다")
+    void fansOutGroupMessageToThirtyActiveParticipants() {
+        when(room.getRoomType()).thenReturn(ChatRoom.GROUP_ROOM_TYPE);
+        List<Long> userIds = new java.util.ArrayList<>(List.of(SENDER_ID, PEER_ID));
+        for (long userId = 30L; userId < 58L; userId++) {
+            userIds.add(userId);
+            ChatRoomParticipant participant = participant(userId, JOINED_AT, null);
+            when(participantRepository.findByChatRoomChatRoomIdAndUserIdForUpdate(CHAT_ROOM_ID, userId))
+                    .thenReturn(Optional.of(participant));
+        }
+        userIds.sort(Long::compareTo);
+        when(participantRepository.findParticipantUserIdsByChatRoomIdOrderByUserId(CHAT_ROOM_ID))
+                .thenReturn(userIds);
+        UUID clientMessageId = UUID.randomUUID();
+        ChatMessageSendRequest request = new ChatMessageSendRequest(clientMessageId, "30명 그룹 메시지");
+        when(messageRepository.findByUserIdAndClientMessageId(SENDER_ID, clientMessageId.toString()))
+                .thenReturn(Optional.empty());
+        when(messageRepository.saveAndFlush(any(ChatMessage.class))).thenReturn(savedMessage);
+        stubSavedMessage(savedMessage, request);
+
+        transactionService.send(CHAT_ROOM_ID, SENDER_ID, request);
+
+        ArgumentCaptor<ChatMessageDeliveryEvent> eventCaptor = ArgumentCaptor.forClass(ChatMessageDeliveryEvent.class);
+        verify(eventPublisher).publishEvent(eventCaptor.capture());
+        assertThat(eventCaptor.getValue().recipientUserIds()).hasSize(30).contains(SENDER_ID, PEER_ID);
     }
 
     @Test

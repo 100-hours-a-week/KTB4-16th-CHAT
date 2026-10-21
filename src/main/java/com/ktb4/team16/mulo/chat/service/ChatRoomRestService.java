@@ -3,11 +3,13 @@ package com.ktb4.team16.mulo.chat.service;
 import com.ktb4.team16.mulo.chat.ChatTime;
 import com.ktb4.team16.mulo.chat.cursor.ChatMessageCursorCodec;
 import com.ktb4.team16.mulo.chat.dto.response.ChatMessageHistoryResponse;
+import com.ktb4.team16.mulo.chat.dto.response.ChatParticipantJoinedResponse;
 import com.ktb4.team16.mulo.chat.dto.response.ChatParticipantLeftResponse;
 import com.ktb4.team16.mulo.chat.dto.response.ChatRoomDetailResponse;
 import com.ktb4.team16.mulo.chat.entity.ChatMessage;
 import com.ktb4.team16.mulo.chat.entity.ChatRoom;
 import com.ktb4.team16.mulo.chat.entity.ChatRoomParticipant;
+import com.ktb4.team16.mulo.chat.event.ChatParticipantJoinedDeliveryEvent;
 import com.ktb4.team16.mulo.chat.event.ChatParticipantLeftDeliveryEvent;
 import com.ktb4.team16.mulo.chat.exception.ChatApiException;
 import com.ktb4.team16.mulo.chat.exception.ChatErrorCode;
@@ -51,12 +53,46 @@ public class ChatRoomRestService {
     @Transactional
     public void enter(Long chatRoomId, Long userId) {
         ChatRoom room = findRoom(chatRoomId);
-        ChatRoomParticipant participant = findParticipantForUpdate(chatRoomId, userId);
+        boolean groupRoom = ChatRoom.GROUP_ROOM_TYPE.equals(room.getRoomType());
+        List<ChatRoomParticipant> participants;
+        ChatRoomParticipant participant;
+        if (groupRoom) {
+            participants = accessService.findParticipantsForUpdate(chatRoomId);
+            participant = participants.stream()
+                    .filter(value -> value.getUserId().equals(userId))
+                    .findFirst()
+                    .orElseThrow(this::notFound);
+        } else {
+            participant = findParticipantForUpdate(chatRoomId, userId);
+            participants = List.of(participant);
+        }
         rejectExpired(room, "만료된 채팅방에는 입장할 수 없습니다.");
         if (participant.getLeftAt() != null) {
             throw new ChatApiException(ChatErrorCode.CHAT_REENTRY_FORBIDDEN);
         }
+        boolean firstScreenEntry = participant.getJoinedAt() == null;
         participant.enter();
+        if (firstScreenEntry && groupRoom) {
+            List<ChatRoomParticipant> activeParticipants = participants.stream()
+                    .filter(accessService::isActiveParticipant)
+                    .toList();
+            List<Long> recipients = activeParticipants.stream()
+                    .map(ChatRoomParticipant::getUserId)
+                    .filter(activeUserId -> !activeUserId.equals(userId))
+                    .toList();
+            if (!recipients.isEmpty()) {
+                ChatParticipantJoinedResponse response = new ChatParticipantJoinedResponse(
+                        "PARTICIPANT_JOINED",
+                        chatRoomId,
+                        participant.getUserId(),
+                        participant.getNickname(),
+                        participant.getVoteChoice(),
+                        activeParticipants.size(),
+                        ChatTime.toOffsetDateTime(participant.getJoinedAt())
+                );
+                eventPublisher.publishEvent(new ChatParticipantJoinedDeliveryEvent(response, recipients));
+            }
+        }
     }
 
     @Transactional(readOnly = true)
@@ -66,8 +102,14 @@ public class ChatRoomRestService {
         rejectExpired(room, "만료된 채팅방은 조회할 수 없습니다.");
         requireActiveParticipant(participant);
         List<ChatRoomParticipant> participants = participantRepository.findAllByChatRoomChatRoomId(chatRoomId);
-        return new ChatRoomDetailResponse(chatRoomId, participants.stream()
-                .map(value -> new ChatRoomDetailResponse.Participant(value.getUserId(), value.getNickname()))
+        int activeCount = (int) participantRepository
+                .countByChatRoomChatRoomIdAndJoinedAtIsNotNullAndLeftAtIsNull(chatRoomId);
+        return new ChatRoomDetailResponse(
+                room.getChatRoomId(), room.getRoomType(), room.getGroupDate(), room.getVoteQuestionId(),
+                room.getRoomSequence(), room.getCapacity(), room.getAdmittedParticipantCount(), activeCount,
+                ChatTime.toOffsetDateTime(room.getExpiresAt()), participants.stream()
+                .map(value -> new ChatRoomDetailResponse.Participant(
+                        value.getUserId(), value.getNickname(), value.getVoteChoice(), value.getLeftAt() != null))
                 .toList());
     }
 
@@ -85,14 +127,16 @@ public class ChatRoomRestService {
                 decodedCursor == null ? null : decodedCursor.chatMessageId(),
                 PageRequest.of(0, HISTORY_PAGE_SIZE)
         );
-        Map<Long, String> nicknames = participantRepository.findAllByChatRoomChatRoomId(chatRoomId).stream()
-                .collect(java.util.stream.Collectors.toMap(ChatRoomParticipant::getUserId,
-                        ChatRoomParticipant::getNickname));
+        Map<Long, ChatRoomParticipant> participantsByUserId = participantRepository
+                .findAllByChatRoomChatRoomId(chatRoomId).stream()
+                .collect(java.util.stream.Collectors.toMap(ChatRoomParticipant::getUserId, value -> value));
         List<ChatMessage> newestFirst = page.getContent();
         List<ChatMessageHistoryResponse.Message> messages = newestFirst.reversed().stream()
                 .map(message -> new ChatMessageHistoryResponse.Message(
                         message.getChatMessageId(), message.getClientMessageId(), message.getUserId(),
-                        nicknames.get(message.getUserId()), message.getContent(), toKstOffsetDateTime(message.getCreatedAt())))
+                        participantsByUserId.get(message.getUserId()).getNickname(), message.getContent(),
+                        toKstOffsetDateTime(message.getCreatedAt()),
+                        participantsByUserId.get(message.getUserId()).getVoteChoice()))
                 .toList();
         String nextCursor = page.hasNext() && !newestFirst.isEmpty()
                 ? cursorCodec.encode(newestFirst.getLast().getCreatedAt(), newestFirst.getLast().getChatMessageId()) : null;
