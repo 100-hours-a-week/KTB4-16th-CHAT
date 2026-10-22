@@ -64,8 +64,7 @@ public class ChatRoomCreateTransactionService {
         List<ChatRoomParticipant> participants = participantRepository.findAllByChatRoomChatRoomId(room.getChatRoomId());
         LocalDateTime requestedExpiresAt = toStoredExpiresAt(request);
         boolean sameParticipants = participants.size() == 2 && request.participants().stream().allMatch(input ->
-                participants.stream().anyMatch(saved -> saved.getUserId().equals(input.userId())
-                        && saved.getNickname().equals(input.nickname())));
+                participants.stream().anyMatch(saved -> saved.getUserId().equals(input.userId())));
         if (!sameParticipants || !room.getExpiresAt().equals(requestedExpiresAt)) {
             throw new ChatApiException(ChatErrorCode.CHAT_ROOM_CONFLICT);
         }

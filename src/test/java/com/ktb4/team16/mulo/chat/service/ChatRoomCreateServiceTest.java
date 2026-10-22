@@ -89,8 +89,8 @@ class ChatRoomCreateServiceTest {
     }
 
     @Test
-    @DisplayName("기존 매칭의 참가자 또는 만료 시각이 다르면 충돌로 처리한다")
-    void rejectsExistingRoomConflict() {
+    @DisplayName("닉네임은 변경 가능하지만 기존 매칭 참가자나 만료 시각이 다르면 충돌로 처리한다")
+    void nicknameChangeDoesNotMakeAnExistingRoomRetryConflict() {
         CreateChatRoomRequest request = request(205_103L, "2026-10-15T00:00:00+09:00", 17L, "jettie", 28L, "lulu");
         ChatRoom room = room(303L, "2026-10-15T00:00:00");
         List<ChatRoomParticipant> participants = List.of(
@@ -98,17 +98,22 @@ class ChatRoomCreateServiceTest {
         when(roomRepository.findByMatchId(request.matchId())).thenReturn(Optional.of(room));
         when(participantRepository.findAllByChatRoomChatRoomId(303L)).thenReturn(participants);
 
-        assertThatThrownBy(() -> service.create(request))
+        assertThat(service.create(request).created()).isFalse();
+
+        CreateChatRoomRequest changedExpiry = request(205_103L, "2026-10-16T00:00:00+09:00", 17L, "jettie", 28L, "lulu");
+        List<ChatRoomParticipant> sameParticipants = List.of(
+                participant(room, 17L, "changed"), participant(room, 28L, "lulu"));
+        when(roomRepository.findByMatchId(changedExpiry.matchId())).thenReturn(Optional.of(room));
+        when(participantRepository.findAllByChatRoomChatRoomId(303L)).thenReturn(sameParticipants);
+        assertThatThrownBy(() -> service.create(changedExpiry))
                 .isInstanceOf(ChatApiException.class)
                 .extracting(exception -> ((ChatApiException) exception).getErrorCode())
                 .isEqualTo(ChatErrorCode.CHAT_ROOM_CONFLICT);
 
-        CreateChatRoomRequest changedExpiry = request(205_103L, "2026-10-16T00:00:00+09:00", 17L, "jettie", 28L, "lulu");
-        List<ChatRoomParticipant> sameParticipants = List.of(
-                participant(room, 17L, "jettie"), participant(room, 28L, "lulu"));
-        when(roomRepository.findByMatchId(changedExpiry.matchId())).thenReturn(Optional.of(room));
-        when(participantRepository.findAllByChatRoomChatRoomId(303L)).thenReturn(sameParticipants);
-        assertThatThrownBy(() -> service.create(changedExpiry))
+        List<ChatRoomParticipant> differentParticipants = List.of(
+                participant(room, 17L, "changed"), participant(room, 39L, "other"));
+        when(participantRepository.findAllByChatRoomChatRoomId(303L)).thenReturn(differentParticipants);
+        assertThatThrownBy(() -> service.create(request))
                 .isInstanceOf(ChatApiException.class)
                 .extracting(exception -> ((ChatApiException) exception).getErrorCode())
                 .isEqualTo(ChatErrorCode.CHAT_ROOM_CONFLICT);
