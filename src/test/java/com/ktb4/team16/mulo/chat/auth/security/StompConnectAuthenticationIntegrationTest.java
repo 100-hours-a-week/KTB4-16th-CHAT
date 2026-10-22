@@ -75,6 +75,7 @@ import org.springframework.web.socket.messaging.SessionSubscribeEvent;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
         "chat.auth.backend.url=http://backend.test",
@@ -82,6 +83,7 @@ import org.junit.jupiter.api.BeforeEach;
         "chat.websocket.allowed-origins=http://localhost"
 })
 @Import(StompConnectAuthenticationIntegrationTest.SubscriptionTestConfiguration.class)
+@EnabledIfEnvironmentVariable(named = "CHAT_DB_URL", matches = ".+")
 class StompConnectAuthenticationIntegrationTest {
 
     @LocalServerPort

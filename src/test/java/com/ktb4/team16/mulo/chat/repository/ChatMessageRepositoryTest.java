@@ -9,6 +9,7 @@ import jakarta.persistence.EntityManager;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.data.jpa.test.autoconfigure.DataJpaTest;
 import org.springframework.boot.jdbc.test.autoconfigure.AutoConfigureTestDatabase;
@@ -16,6 +17,7 @@ import org.springframework.dao.DataIntegrityViolationException;
 
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
+@EnabledIfEnvironmentVariable(named = "CHAT_DB_URL", matches = ".+")
 class ChatMessageRepositoryTest {
 
     @Autowired

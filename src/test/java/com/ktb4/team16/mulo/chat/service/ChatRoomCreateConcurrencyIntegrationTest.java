@@ -15,11 +15,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledIfEnvironmentVariable;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
 
 @SpringBootTest(properties = "chat.websocket.allowed-origins=http://localhost")
+@EnabledIfEnvironmentVariable(named = "CHAT_DB_URL", matches = ".+")
 class ChatRoomCreateConcurrencyIntegrationTest {
 
     private static final AtomicLong MATCH_ID_SEQUENCE = new AtomicLong(System.currentTimeMillis() * 1000);

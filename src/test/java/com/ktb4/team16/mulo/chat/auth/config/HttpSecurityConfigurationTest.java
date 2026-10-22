@@ -10,26 +10,38 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ktb4.team16.mulo.chat.auth.config.BackendAuthClientConfiguration;
 import com.ktb4.team16.mulo.chat.auth.dto.BackendAuthResponse;
+import com.ktb4.team16.mulo.chat.auth.security.ApiAuthenticationErrorHandler;
+import com.ktb4.team16.mulo.chat.auth.security.WebSocketHandshakeRequestMatcher;
 import com.ktb4.team16.mulo.chat.auth.service.BackendTokenVerifier;
+import com.ktb4.team16.mulo.chat.controller.ChatRoomRestController;
+import com.ktb4.team16.mulo.chat.controller.HealthController;
+import com.ktb4.team16.mulo.chat.controller.InternalChatRoomController;
 import com.ktb4.team16.mulo.chat.dto.response.CreateChatRoomResponse;
-import com.ktb4.team16.mulo.chat.service.ChatRoomCreateService;
 import com.ktb4.team16.mulo.chat.dto.response.GroupChatJoinOrCreateResponse;
+import com.ktb4.team16.mulo.chat.service.ChatRoomCreateService;
+import com.ktb4.team16.mulo.chat.service.ChatRoomRestService;
 import com.ktb4.team16.mulo.chat.service.GroupChatRoomJoinService;
 import java.time.OffsetDateTime;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-@SpringBootTest(properties = {
+@WebMvcTest(controllers = {
+        ChatRoomRestController.class,
+        HealthController.class,
+        InternalChatRoomController.class
+}, properties = {
         "chat.auth.backend.url=http://backend.test",
         "chat.auth.backend.internal-api-key=test-internal-key",
         "chat.websocket.allowed-origins=http://localhost"
 })
-@AutoConfigureMockMvc
+@Import({HttpSecurityConfiguration.class, BackendAuthClientConfiguration.class,
+        WebSocketHandshakeRequestMatcher.class, ApiAuthenticationErrorHandler.class})
 class HttpSecurityConfigurationTest {
 
     @Autowired
@@ -44,6 +56,9 @@ class HttpSecurityConfigurationTest {
     @MockitoBean
     private GroupChatRoomJoinService groupChatRoomJoinService;
 
+    @MockitoBean
+    private ChatRoomRestService chatRoomRestService;
+
     @Test
     void requiresBackendVerifiedBearerForChatRoomApi() throws Exception {
         mockMvc.perform(get("/api/chat-rooms/17/messages"))
@@ -53,7 +68,7 @@ class HttpSecurityConfigurationTest {
         when(tokenVerifier.verify("valid-token"))
                 .thenReturn(new BackendAuthResponse(17L, OffsetDateTime.parse("2026-10-14T00:00:00+09:00")));
         mockMvc.perform(get("/api/chat-rooms/17/messages").header("Authorization", "Bearer valid-token"))
-                .andExpect(status().isNotFound());
+                .andExpect(status().isOk());
         verify(tokenVerifier).verify("valid-token");
     }
 

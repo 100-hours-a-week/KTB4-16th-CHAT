@@ -27,7 +27,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
-@SpringBootTest
+@SpringBootTest(properties = "chat.websocket.allowed-origins=http://localhost")
 @EnabledIfEnvironmentVariable(
         named = "CHAT_GROUP_TEST_DB_URL",
         matches = "jdbc:mysql://[^/]+/mulo_chat_group_test(?:\\?.*)?"
