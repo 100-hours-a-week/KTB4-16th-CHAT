@@ -2,7 +2,9 @@ package com.ktb4.team16.mulo.chat.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.ktb4.team16.mulo.chat.dto.request.ChatMessageSendRequest;
@@ -12,6 +14,7 @@ import com.ktb4.team16.mulo.chat.entity.ChatRoomParticipant;
 import com.ktb4.team16.mulo.chat.exception.ChatMessageSendException;
 import com.ktb4.team16.mulo.chat.exception.ChatSendAccessException;
 import com.ktb4.team16.mulo.chat.exception.ChatSendDiagnostic;
+import com.ktb4.team16.mulo.chat.exception.ChatRoomAccessException;
 import com.ktb4.team16.mulo.chat.repository.ChatMessageRepository;
 import com.ktb4.team16.mulo.chat.repository.ChatRoomParticipantRepository;
 import java.util.List;
@@ -122,8 +125,49 @@ class ChatMessageSendPrecheckServiceTest {
         assertThatThrownBy(() -> service.requiresModeration(ROOM_ID, SENDER_ID, request("본문")))
                 .isInstanceOf(ChatSendAccessException.class)
                 .satisfies(exception -> {
-                    ChatSendDiagnostic diagnostic = ((ChatSendAccessException) exception).getDiagnostic();
-                    assertThat(diagnostic.reason()).isEqualTo(ChatSendDiagnostic.Reason.PEER_NOT_ACTIVE);
+                    ChatSendAccessException accessException = (ChatSendAccessException) exception;
+                    assertThat(accessException.getReason())
+                            .isEqualTo(ChatRoomAccessException.Reason.PARTICIPANT_LEFT);
+                    assertThat(accessException.getDiagnostic().reason())
+                            .isEqualTo(ChatSendDiagnostic.Reason.PEER_NOT_ACTIVE);
+                });
+    }
+
+    @Test
+    @DisplayName("상대방이 아직 입장하지 않았으면 선검사에서 별도 접근 사유로 거부한다")
+    void rejectsPeerWhoHasNotJoinedYet() {
+        when(peer.getJoinedAt()).thenReturn(null);
+
+        assertThatThrownBy(() -> service.requiresModeration(ROOM_ID, SENDER_ID, request("본문")))
+                .isInstanceOf(ChatSendAccessException.class)
+                .satisfies(exception -> {
+                    ChatSendAccessException accessException = (ChatSendAccessException) exception;
+                    assertThat(accessException.getReason())
+                            .isEqualTo(ChatRoomAccessException.Reason.PEER_NOT_JOINED);
+                    assertThat(accessException.getDiagnostic().stage())
+                            .isEqualTo(ChatSendDiagnostic.Stage.PRECHECK);
+                    assertThat(accessException.getDiagnostic().reason())
+                            .isEqualTo(ChatSendDiagnostic.Reason.PEER_NOT_ACTIVE);
+                });
+
+        verify(messageRepository, never()).findByUserIdAndClientMessageId(
+                SENDER_ID, "00000000-0000-0000-0000-000000000001");
+    }
+
+    @Test
+    @DisplayName("상대방이 퇴장한 경우 기존 참가자 권한 거부 사유를 유지한다")
+    void keepsExistingRejectionWhenPeerHasLeft() {
+        when(peer.getLeftAt()).thenReturn(java.time.LocalDateTime.now());
+        when(accessService.isActiveParticipant(peer)).thenReturn(false);
+
+        assertThatThrownBy(() -> service.requiresModeration(ROOM_ID, SENDER_ID, request("본문")))
+                .isInstanceOf(ChatSendAccessException.class)
+                .satisfies(exception -> {
+                    ChatSendAccessException accessException = (ChatSendAccessException) exception;
+                    assertThat(accessException.getReason())
+                            .isEqualTo(ChatRoomAccessException.Reason.PARTICIPANT_LEFT);
+                    assertThat(accessException.getDiagnostic().reason())
+                            .isEqualTo(ChatSendDiagnostic.Reason.PEER_NOT_ACTIVE);
                 });
     }
 
