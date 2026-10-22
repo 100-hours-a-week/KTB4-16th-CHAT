@@ -5,6 +5,7 @@ import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Optional;
 import java.time.LocalDate;
+import java.util.Collection;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -37,6 +38,19 @@ public interface ChatRoomParticipantRepository extends JpaRepository<ChatRoomPar
     List<ChatRoomParticipant> findAllByChatRoomChatRoomId(Long chatRoomId);
 
     List<ChatRoomParticipant> findAllByChatRoomChatRoomIdAndJoinedAtIsNotNullAndLeftAtIsNull(Long chatRoomId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select participant
+            from ChatRoomParticipant participant
+            where participant.userId = :userId
+            order by participant.chatRoomParticipantId
+            """)
+    List<ChatRoomParticipant> findAllByUserIdForUpdate(@Param("userId") Long userId);
+
+    List<ChatRoomParticipant> findAllByChatRoomChatRoomIdInAndJoinedAtIsNotNullAndLeftAtIsNull(
+            Collection<Long> chatRoomIds
+    );
 
     boolean existsByChatRoomChatRoomIdAndUserId(Long chatRoomId, Long userId);
 

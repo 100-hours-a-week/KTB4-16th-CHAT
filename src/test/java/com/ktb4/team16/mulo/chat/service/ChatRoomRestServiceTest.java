@@ -230,6 +230,8 @@ class ChatRoomRestServiceTest {
         assertThat(response.admittedParticipantCount()).isEqualTo(3);
         assertThat(response.activeParticipantCount()).isEqualTo(2);
         assertThat(response.expiresAt().getOffset()).isEqualTo(ZoneOffset.ofHours(9));
+        assertThat(response.participants()).extracting(ChatRoomDetailResponse.Participant::nickname)
+                .containsExactly("sender", "peer");
         assertThat(response.participants()).extracting(ChatRoomDetailResponse.Participant::voteChoice)
                 .containsExactly("A", "B");
     }
@@ -284,7 +286,7 @@ class ChatRoomRestServiceTest {
         ChatMessage oldest = message(301L, timestamp, USER_ID, "first");
         ChatRoomParticipant user = participant(LocalDateTime.now(), null);
         when(user.getUserId()).thenReturn(USER_ID);
-        when(user.getNickname()).thenReturn("jettie");
+        when(user.getNickname()).thenReturn("renamed-jettie");
         arrangeRoomAndParticipant(activeRoom(), user);
         when(messageRepository.findHistory(eq(CHAT_ROOM_ID), any(), any(), any(Pageable.class)))
                 .thenReturn(new SliceImpl<>(List.of(newest, oldest), Pageable.ofSize(20), true));
@@ -296,6 +298,7 @@ class ChatRoomRestServiceTest {
                 .containsExactly(301L, 302L);
         assertThat(response.messages().getFirst().createdAt().getOffset()).isEqualTo(ZoneOffset.ofHours(9));
         assertThat(response.messages().getFirst().createdAt().toLocalDateTime()).isEqualTo(timestamp);
+        assertThat(response.messages().getFirst().nickname()).isEqualTo("renamed-jettie");
         assertThat(response.hasNext()).isTrue();
         assertThat(response.nextCursor()).isNotBlank();
     }
