@@ -21,6 +21,7 @@ public enum ChatErrorCode {
     MODERATION_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "현재 메시지를 전송할 수 없어요. 잠시 후 다시 시도해 주세요."),
     CHAT_ROOM_CREATE_EXPIRED(HttpStatus.CONFLICT, "CHAT_ROOM_EXPIRED", "만료된 매칭은 새 채팅방을 생성할 수 없습니다."),
     CHAT_ROOM_CONFLICT(HttpStatus.CONFLICT, "동일 매칭 ID의 채팅방 정보가 기존 요청과 다릅니다."),
+    CHAT_GROUP_ASSIGNMENT_CONFLICT(HttpStatus.CONFLICT, "이미 배정된 그룹 채팅 정보가 요청과 다릅니다."),
     CLIENT_MESSAGE_ID_CONFLICT(HttpStatus.CONFLICT, "이미 다른 메시지에 사용된 clientMessageId입니다."),
     MESSAGE_TOO_LONG(HttpStatus.BAD_REQUEST, "메시지는 500자 이하여야 합니다."),
     INVALID_INPUT_VALUE(HttpStatus.BAD_REQUEST, "입력값을 확인해주세요."),

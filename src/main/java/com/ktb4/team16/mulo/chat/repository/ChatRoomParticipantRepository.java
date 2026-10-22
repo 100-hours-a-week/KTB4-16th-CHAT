@@ -4,6 +4,7 @@ import com.ktb4.team16.mulo.chat.entity.ChatRoomParticipant;
 import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Optional;
+import java.time.LocalDate;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -40,4 +41,19 @@ public interface ChatRoomParticipantRepository extends JpaRepository<ChatRoomPar
     boolean existsByChatRoomChatRoomIdAndUserId(Long chatRoomId, Long userId);
 
     long countByChatRoomChatRoomId(Long chatRoomId);
+
+    Optional<ChatRoomParticipant> findByGroupDateAndUserId(LocalDate groupDate, Long userId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("""
+            select participant
+            from ChatRoomParticipant participant
+            where participant.groupDate = :groupDate
+              and participant.userId = :userId
+            """)
+    Optional<ChatRoomParticipant> findByGroupDateAndUserIdForUpdate(
+            @Param("groupDate") LocalDate groupDate, @Param("userId") Long userId
+    );
+
+    long countByChatRoomChatRoomIdAndJoinedAtIsNotNullAndLeftAtIsNull(Long chatRoomId);
 }
