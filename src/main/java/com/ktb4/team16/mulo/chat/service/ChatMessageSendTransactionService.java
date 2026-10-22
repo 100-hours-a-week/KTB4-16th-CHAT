@@ -62,7 +62,8 @@ public class ChatMessageSendTransactionService {
             logDenied(chatRoomId, userId, request, diagnostic.reason().name(), null);
             throw new ChatSendAccessException(exception.getReason(), diagnostic);
         }
-        if (participants.size() != 2) {
+        boolean groupRoom = ChatRoom.GROUP_ROOM_TYPE.equals(room.getRoomType());
+        if (!groupRoom && participants.size() != 2) {
             ChatSendDiagnostic diagnostic = diagnostic(
                     ChatSendDiagnostic.Stage.TRANSACTION, ChatSendDiagnostic.Reason.PARTICIPANT_COUNT_MISMATCH);
             logDenied(chatRoomId, userId, request, diagnostic.reason().name(), participants);
@@ -97,21 +98,23 @@ public class ChatMessageSendTransactionService {
             throw new ChatSendAccessException(exception.getReason(), diagnostic);
         }
 
-        ChatRoomParticipant peerParticipant = participants.stream()
-                .filter(participant -> !participant.getUserId().equals(userId))
-                .findFirst()
-                .orElse(null);
-        if (isNotYetJoined(peerParticipant)) {
-            ChatSendDiagnostic diagnostic = diagnostic(
-                    ChatSendDiagnostic.Stage.TRANSACTION, ChatSendDiagnostic.Reason.PEER_NOT_ACTIVE);
-            logDenied(chatRoomId, userId, request, diagnostic.reason().name(), participants);
-            throw new ChatSendAccessException(ChatRoomAccessException.Reason.PEER_NOT_JOINED, diagnostic);
+        if (!groupRoom) {
+            ChatRoomParticipant peerParticipant = participants.stream()
+                    .filter(participant -> !participant.getUserId().equals(userId))
+                    .findFirst()
+                    .orElse(null);
+            if (isNotYetJoined(peerParticipant)) {
+                ChatSendDiagnostic diagnostic = diagnostic(
+                        ChatSendDiagnostic.Stage.TRANSACTION, ChatSendDiagnostic.Reason.PEER_NOT_ACTIVE);
+                logDenied(chatRoomId, userId, request, diagnostic.reason().name(), participants);
+                throw new ChatSendAccessException(ChatRoomAccessException.Reason.PEER_NOT_JOINED, diagnostic);
+            }
         }
 
         List<ChatRoomParticipant> activeParticipants = participants.stream()
                 .filter(chatRoomAccessService::isActiveParticipant)
                 .toList();
-        if (activeParticipants.size() != 2) {
+        if (groupRoom ? activeParticipants.size() < 2 : activeParticipants.size() != 2) {
             ChatSendDiagnostic diagnostic = diagnostic(
                     ChatSendDiagnostic.Stage.TRANSACTION, ChatSendDiagnostic.Reason.PEER_NOT_ACTIVE);
             logDenied(chatRoomId, userId, request, diagnostic.reason().name(), participants);
@@ -125,15 +128,28 @@ public class ChatMessageSendTransactionService {
             if (!matches(existing, chatRoomId, request)) {
                 throw ChatMessageSendException.conflict(request.clientMessageId());
             }
-            publish(existing, List.of(userId));
+            publish(existing, List.of(userId), sender.getVoteChoice());
             return;
         }
 
-        ChatRoomParticipant peer = activeParticipants.stream()
-                .filter(participant -> !participant.getUserId().equals(userId))
-                .findFirst()
-                .orElse(null);
-        if (peer == null) {
+        List<Long> recipientUserIds;
+        if (groupRoom) {
+            recipientUserIds = activeParticipants.stream().map(ChatRoomParticipant::getUserId).toList();
+        } else {
+            ChatRoomParticipant peer = activeParticipants.stream()
+                    .filter(participant -> !participant.getUserId().equals(userId))
+                    .findFirst()
+                    .orElse(null);
+            if (peer == null) {
+                ChatSendDiagnostic diagnostic = diagnostic(
+                        ChatSendDiagnostic.Stage.TRANSACTION,
+                        ChatSendDiagnostic.Reason.PEER_NOT_FOUND_AFTER_ACTIVE_CHECK);
+                logDenied(chatRoomId, userId, request, diagnostic.reason().name(), participants);
+                throw forbidden(request, diagnostic);
+            }
+            recipientUserIds = List.of(userId, peer.getUserId());
+        }
+        if (recipientUserIds.isEmpty()) {
             ChatSendDiagnostic diagnostic = diagnostic(
                     ChatSendDiagnostic.Stage.TRANSACTION, ChatSendDiagnostic.Reason.PEER_NOT_FOUND_AFTER_ACTIVE_CHECK);
             logDenied(chatRoomId, userId, request, diagnostic.reason().name(), participants);
@@ -141,7 +157,7 @@ public class ChatMessageSendTransactionService {
         }
         ChatMessage saved = messageRepository.saveAndFlush(ChatMessage.create(
                 room, userId, request.clientMessageId().toString(), request.content()));
-        publish(saved, List.of(userId, peer.getUserId()));
+        publish(saved, recipientUserIds, sender.getVoteChoice());
     }
 
     private boolean matches(ChatMessage message, Long chatRoomId, ChatMessageSendRequest request) {
@@ -149,7 +165,7 @@ public class ChatMessageSendTransactionService {
                 && message.getContent().equals(request.content());
     }
 
-    private void publish(ChatMessage message, List<Long> recipientUserIds) {
+    private void publish(ChatMessage message, List<Long> recipientUserIds, String voteChoice) {
         ChatMessageResponse response = new ChatMessageResponse(
                 MESSAGE_TYPE,
                 message.getChatRoom().getChatRoomId(),
@@ -157,7 +173,8 @@ public class ChatMessageSendTransactionService {
                 java.util.UUID.fromString(message.getClientMessageId()),
                 message.getUserId(),
                 message.getContent(),
-                ChatTime.toOffsetDateTime(message.getCreatedAt())
+                ChatTime.toOffsetDateTime(message.getCreatedAt()),
+                voteChoice
         );
         eventPublisher.publishEvent(new ChatMessageDeliveryEvent(response, recipientUserIds));
     }

@@ -1,6 +1,7 @@
 package com.ktb4.team16.mulo.chat.service;
 
 import com.ktb4.team16.mulo.chat.event.ChatParticipantLeftDeliveryEvent;
+import com.ktb4.team16.mulo.chat.event.ChatParticipantJoinedDeliveryEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -26,6 +27,19 @@ public class ChatRoomEventDeliveryListener {
                         event.response().chatRoomId(), recipientUserId, event.response());
             } catch (RuntimeException exception) {
                 log.warn("커밋된 퇴장 이벤트를 사용자에게 전달하지 못했습니다. userId={}, cause={}",
+                        recipientUserId, exception.getClass().getSimpleName());
+            }
+        }
+    }
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    public void deliverParticipantJoined(ChatParticipantJoinedDeliveryEvent event) {
+        for (Long recipientUserId : event.recipientUserIds()) {
+            try {
+                deliveryService.deliverParticipantJoinedIfActive(
+                        event.response().chatRoomId(), recipientUserId, event.response());
+            } catch (RuntimeException exception) {
+                log.warn("커밋된 입장 이벤트를 사용자에게 전달하지 못했습니다. userId={}, cause={}",
                         recipientUserId, exception.getClass().getSimpleName());
             }
         }

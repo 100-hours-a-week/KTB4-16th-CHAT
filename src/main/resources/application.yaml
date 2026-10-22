@@ -33,13 +33,20 @@ chat:
 
 server:
   port: 8081
+  tomcat:
+    mbeanregistry:
+      enabled: true
 
 # 상태 확인과 Prometheus 지표 엔드포인트를 HTTP로 노출한다.
 management:
   endpoints:
     web:
       exposure:
-        include: health,prometheus
+        include: health,prometheus,info,metrics
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
 
 sentry:
   dsn: ${SENTRY_DSN:}
