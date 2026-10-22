@@ -16,6 +16,7 @@ public class ChatRoomAccessException extends RuntimeException {
         ROOM_NOT_FOUND,
         PARTICIPANT_NOT_FOUND,
         PARTICIPANT_NOT_JOINED,
+        PEER_NOT_JOINED,
         PARTICIPANT_LEFT,
         ROOM_EXPIRED
     }

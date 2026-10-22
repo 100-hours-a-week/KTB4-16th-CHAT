@@ -110,6 +110,10 @@ public class ChatRoomParticipant {
         return nickname;
     }
 
+    public void changeNickname(String nickname) {
+        this.nickname = nickname;
+    }
+
     public LocalDate getGroupDate() { return groupDate; }
 
     public String getVoteChoice() { return voteChoice; }

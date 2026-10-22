@@ -67,8 +67,11 @@ public class ChatMessageSendService {
         } catch (ChatModerationUnavailableException exception) {
             throw new ChatMessageSendException(ChatErrorCode.MODERATION_UNAVAILABLE, request.clientMessageId());
         } catch (ChatRoomAccessException exception) {
-            ChatErrorCode errorCode = exception.getReason() == ChatRoomAccessException.Reason.ROOM_EXPIRED
-                    ? ChatErrorCode.CHAT_ROOM_EXPIRED : ChatErrorCode.CHAT_SEND_FORBIDDEN;
+            ChatErrorCode errorCode = switch (exception.getReason()) {
+                case ROOM_EXPIRED -> ChatErrorCode.CHAT_ROOM_EXPIRED;
+                case PEER_NOT_JOINED -> ChatErrorCode.CHAT_PEER_NOT_JOINED;
+                default -> ChatErrorCode.CHAT_SEND_FORBIDDEN;
+            };
             ChatSendDiagnostic diagnostic = exception instanceof ChatSendAccessException sendAccessException
                     ? sendAccessException.getDiagnostic() : null;
             throw new ChatMessageSendException(errorCode, request.clientMessageId(), diagnostic);

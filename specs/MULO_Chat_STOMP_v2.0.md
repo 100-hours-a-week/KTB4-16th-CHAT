@@ -134,7 +134,8 @@ Destination: 남은 참가자의 `/user/queue/chat-events`
 | 지원하지 않는 STOMP 명령 | `COMMAND_NOT_ALLOWED` | 명령 거부 |
 | 허용되지 않은 SUBSCRIBE | `STOMP_DESTINATION_FORBIDDEN` | 구독 거부 |
 | 허용되지 않은 SEND Destination | `STOMP_DESTINATION_FORBIDDEN` | SEND 거부 |
-| 참가자/입장/퇴장 상태로 SEND 불가 | `CHAT_SEND_FORBIDDEN` | 메시지를 저장하거나 전달하지 않음 |
+| 채팅방이 유효하고 참가자가 2명이며, 활성 발신자에 대해 상대방이 아직 입장하지 않음 (`joined_at IS NULL`, `left_at IS NULL`) | `CHAT_PEER_NOT_JOINED` | `상대방이 아직 채팅방에 입장하지 않았습니다.` 메시지를 저장하거나 전달하지 않음 |
+| 그 외 참가자/입장/퇴장 상태로 SEND 불가 | `CHAT_SEND_FORBIDDEN` | 메시지를 저장하거나 전달하지 않음 |
 | 채팅방 만료 | `CHAT_ROOM_EXPIRED` | 메시지를 저장하거나 전달하지 않음 |
 | 같은 ID를 다른 방 또는 내용에 재사용 | `CLIENT_MESSAGE_ID_CONFLICT` | 기존 메시지를 변경하지 않음 |
 | 메시지 500자 초과 | `MESSAGE_TOO_LONG` | 메시지를 저장하거나 전달하지 않음 |

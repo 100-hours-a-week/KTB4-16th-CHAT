@@ -14,6 +14,9 @@ class ChatErrorCodeTest {
         assertThat(ChatErrorCode.CHAT_ROOM_NOT_FOUND.code()).isEqualTo("CHAT_ROOM_NOT_FOUND");
         assertThat(ChatErrorCode.CHAT_ROOM_NOT_FOUND.status()).isEqualTo(HttpStatus.NOT_FOUND);
         assertThat(ChatErrorCode.CHAT_ROOM_NOT_FOUND.message()).isEqualTo("채팅방을 찾을 수 없습니다.");
+        assertThat(ChatErrorCode.CHAT_PEER_NOT_JOINED.code()).isEqualTo("CHAT_PEER_NOT_JOINED");
+        assertThat(ChatErrorCode.CHAT_PEER_NOT_JOINED.status()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(ChatErrorCode.CHAT_PEER_NOT_JOINED.message()).isEqualTo("상대방이 아직 채팅방에 입장하지 않았습니다.");
     }
 
     @Test

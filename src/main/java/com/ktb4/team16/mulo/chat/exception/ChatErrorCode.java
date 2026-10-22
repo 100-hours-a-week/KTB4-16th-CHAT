@@ -13,6 +13,7 @@ public enum ChatErrorCode {
     COMMAND_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "허용되지 않은 STOMP 명령입니다."),
     STOMP_DESTINATION_FORBIDDEN(HttpStatus.FORBIDDEN, "허용되지 않은 STOMP 목적지입니다."),
     CHAT_SEND_FORBIDDEN(HttpStatus.FORBIDDEN, "채팅방에서 메시지를 보낼 수 없습니다."),
+    CHAT_PEER_NOT_JOINED(HttpStatus.FORBIDDEN, "상대방이 아직 채팅방에 입장하지 않았습니다."),
     CHAT_ROOM_EXPIRED(HttpStatus.FORBIDDEN, "만료된 채팅방에서는 메시지를 보낼 수 없습니다."),
     PROHIBITED_WORD(HttpStatus.BAD_REQUEST, "전송할 수 없는 단어가 포함되어 있어요."),
     SPAM_DETECTED(HttpStatus.BAD_REQUEST, "스팸으로 의심되는 메시지는 전송할 수 없어요."),
