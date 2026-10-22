@@ -39,6 +39,7 @@ public class HttpSecurityConfiguration {
                 )
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(HttpMethod.GET, "/health").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/actuator/prometheus").permitAll()
                         .requestMatchers(webSocketHandshakeMatcher).permitAll()
                         .requestMatchers("/api/chat-rooms", "/api/chat-rooms/**").hasRole("CHAT_USER")
                         .requestMatchers("/internal", "/internal/**").hasRole("INTERNAL_SERVICE")
