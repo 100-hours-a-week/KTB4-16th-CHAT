@@ -280,20 +280,29 @@ class StompConnectAuthenticationIntegrationTest {
     void rejectsUnapprovedDestinationsAndUnsupportedCommandsAfterSuccessfulConnect() throws Exception {
         when(tokenVerifier.verify("valid-token"))
                 .thenReturn(new BackendAuthResponse(17L, futureExpiry()));
-        List<String[]> rejectedCommands = List.of(
-                new String[]{"SUBSCRIBE\nid:sub-1\ndestination:/topic/public\n\n\u0000",
-                        "STOMP_DESTINATION_FORBIDDEN"},
-                new String[]{"SEND\ndestination:/app/other\ncontent-type:application/json\n\n{}\u0000",
-                        "STOMP_DESTINATION_FORBIDDEN"},
-                new String[]{"ACK\nid:ack-1\n\n\u0000", "COMMAND_NOT_ALLOWED"}
+        List<RejectedStompCommand> rejectedCommands = List.of(
+                new RejectedStompCommand("SUBSCRIBE", "/topic/public",
+                        "SUBSCRIBE\nid:sub-1\ndestination:/topic/public\n\n\u0000",
+                        "STOMP_DESTINATION_FORBIDDEN"),
+                new RejectedStompCommand("SEND", "/app/other",
+                        "SEND\ndestination:/app/other\ncontent-type:application/json\n\n{}\u0000",
+                        "STOMP_DESTINATION_FORBIDDEN"),
+                new RejectedStompCommand("ACK", "(destination 없음)",
+                        "ACK\nid:ack-1\n\n\u0000", "COMMAND_NOT_ALLOWED")
         );
-        for (String[] rejectedCommand : rejectedCommands) {
+        for (RejectedStompCommand rejectedCommand : rejectedCommands) {
             StompSocket socket = connect("Authorization:Bearer valid-token\n");
-            assertTrue(socket.awaitFrame());
-            socket.send(rejectedCommand[0]);
-            assertTrue(socket.awaitError());
-            assertTrue(socket.awaitFrameContaining(rejectedCommand[1]));
-            assertTrue(socket.awaitClose());
+            try {
+                assertTrue(socket.awaitFrameContaining("CONNECTED"),
+                        socket.diagnostic(rejectedCommand, "CONNECTED"));
+                socket.send(rejectedCommand.frame());
+                assertTrue(socket.awaitError(), socket.diagnostic(rejectedCommand, "ERROR"));
+                assertTrue(socket.awaitFrameContaining(rejectedCommand.expectedCode()),
+                        socket.diagnostic(rejectedCommand, rejectedCommand.expectedCode()));
+                assertTrue(socket.awaitCloseCallback(), socket.diagnostic(rejectedCommand, "CLOSED callback"));
+            } finally {
+                closeQuietly(socket);
+            }
         }
     }
 
@@ -1143,6 +1152,9 @@ class StompConnectAuthenticationIntegrationTest {
         return false;
     }
 
+    private record RejectedStompCommand(String command, String destination, String frame, String expectedCode) {
+    }
+
     private record StompSocket(WebSocket socket, RecordingListener listener) {
 
         private boolean awaitFrame() throws InterruptedException {
@@ -1206,6 +1218,21 @@ class StompConnectAuthenticationIntegrationTest {
             return listener.closeLatch.await(5, TimeUnit.SECONDS);
         }
 
+        private boolean awaitCloseCallback() throws InterruptedException {
+            return listener.closeCallbackLatch.await(5, TimeUnit.SECONDS);
+        }
+
+        private String diagnostic(RejectedStompCommand rejectedCommand, String expectedFrame) {
+            return "STOMP 검증 실패: command=" + rejectedCommand.command()
+                    + ", destination=" + rejectedCommand.destination()
+                    + ", 기대 프레임=" + expectedFrame
+                    + ", 기대 오류 코드=" + rejectedCommand.expectedCode()
+                    + ", 실제 수신 프레임=" + frames()
+                    + ", 연결 종료 여부=" + listener.closed
+                    + ", WebSocket 오류=" + listener.transportError
+                    + ", 수신 이벤트=" + events();
+        }
+
         // 일반 프레임과 구별되는 개행 Heartbeat가 도착할 때까지 기다립니다.
         private boolean awaitHeartbeat() throws InterruptedException {
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(25);
@@ -1244,9 +1271,11 @@ class StompConnectAuthenticationIntegrationTest {
         private final ConcurrentLinkedQueue<String> events = new ConcurrentLinkedQueue<>();
         private final CountDownLatch frameLatch = new CountDownLatch(1);
         private final CountDownLatch closeLatch = new CountDownLatch(1);
+        private final CountDownLatch closeCallbackLatch = new CountDownLatch(1);
         private final Object frameMonitor = new Object();
         private final StringBuilder currentFrame = new StringBuilder();
         private volatile boolean closed;
+        private volatile String transportError;
 
         @Override
         public void onOpen(WebSocket webSocket) {
@@ -1272,8 +1301,9 @@ class StompConnectAuthenticationIntegrationTest {
         @Override
         public CompletableFuture<?> onClose(WebSocket webSocket, int statusCode, String reason) {
             closed = true;
-            events.add("CLOSED");
+            events.add("CLOSED status=" + statusCode + " reason=" + reason);
             closeLatch.countDown();
+            closeCallbackLatch.countDown();
             synchronized (frameMonitor) {
                 frameMonitor.notifyAll();
             }
@@ -1282,6 +1312,8 @@ class StompConnectAuthenticationIntegrationTest {
 
         @Override
         public void onError(WebSocket webSocket, Throwable error) {
+            transportError = error.getClass().getSimpleName();
+            events.add("TRANSPORT_ERROR " + transportError);
             closeLatch.countDown();
         }
     }
