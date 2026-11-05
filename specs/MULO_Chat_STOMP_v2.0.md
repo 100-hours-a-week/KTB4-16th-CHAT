@@ -3,10 +3,11 @@
 ## 범위와 소유권
 
 - 이 문서는 Chat Server 소유의 WebSocket + STOMP 실시간 메시지 계약이다.
-- HTTP 채팅 API와 Backend 연동 API는 `specs/openapi/MULO_OpenAPI_v2.7.yaml`을 기준으로 한다.
+- 기존 HTTP 채팅 API와 Backend 연동 계약은 각 API 명세를 따른다. #330의 새 sync 계약은 BE 저장소의 통합 OpenAPI v2.8 후속 문서 PR과 아래 HTTP 복구 절을 따른다. 과거 이력 API의 전체 계약 정합성은 이번 변경 범위가 아니다.
 - Chat Server 전용 로그인은 없다. 사용자 인증은 Backend Access Token 검증 결과를 사용한다.
 - 채팅방은 매칭된 두 명만 참여하는 1:1 구조다.
-- 메시지는 Chat Server MySQL에 저장한다. DB COMMIT 성공 후에만 실시간으로 전달한다. V2에서는 Redis Pub/Sub을 사용하지 않는다.
+- 메시지는 Chat Server MySQL에 저장한다. #330에서는 DB COMMIT 성공 후 Redis Pub/Sub으로 태스크 간 전달하고 각 태스크가 로컬 접속자에게 전송한다.
+- 추가 계약의 기준은 [CHAT #36](https://github.com/100-hours-a-week/KTB4-16th-CHAT/pull/36) / [FE #147](https://github.com/100-hours-a-week/KTB4-16th-FE/pull/147)이며 기능 PR 미병합·운영 미배포 상태다. 기존 payload·user destination·인증 및 참가자 권한은 유지한다.
 
 ## 연결 및 인증
 
@@ -67,7 +68,7 @@ content-type: application/json
 
 - `clientMessageId`는 클라이언트가 생성하는 UUID다.
 - 서버는 인증/권한을 확인한 뒤 `clientMessageId` 중복 여부를 확인하고 신규 메시지를 MySQL에 저장한다.
-- DB COMMIT 성공 후 각 수신자의 참가 상태를 전달 직전에 다시 확인한 뒤 사용자별 큐로 결과를 보낸다. 확인 시점에 퇴장한 수신자에게는 전달하지 않는다.
+- DB COMMIT 성공 후 Redis에 발행한다. 각 구독 태스크는 자기 로컬 접속자를 필터링하고 수신자의 참가 상태를 전달 직전에 다시 확인한 뒤 기존 사용자별 큐로 결과를 보낸다. 확인 시점에 퇴장한 수신자에게는 전달하지 않는다.
 - SEND가 유효하게 COMMIT된 경우, 전달 시점에 채팅방 만료 시각이 지났더라도 MESSAGE 전달을 허용하며 전달 단계에서 만료 여부를 다시 확인하지 않는다.
 - 발신자도 같은 결과를 수신하며 `clientMessageId`로 전송 성공을 확인한다. 별도의 ACK destination은 없다.
 
@@ -130,6 +131,7 @@ Destination: 남은 참가자의 `/user/queue/chat-events`
 
 | 상황 | 오류 코드 | 처리 |
 |---|---|---|
+| 전달 경로 준비 전·장애·종료 중 신규 SEND | `CHAT_DELIVERY_UNAVAILABLE` | 임시 전송 불가. 소켓이 이미 종료된 경우 큐 오류 수신까지 보장하지 않으며 재연결 후 DB 저장 여부 확인 |
 | CONNECT 인증 실패 | `UNAUTHORIZED` | CONNECT 거부 |
 | 지원하지 않는 STOMP 명령 | `COMMAND_NOT_ALLOWED` | 명령 거부 |
 | 허용되지 않은 SUBSCRIBE | `STOMP_DESTINATION_FORBIDDEN` | 구독 거부 |
@@ -147,10 +149,36 @@ STOMP 오류는 HTTP 상태 코드가 아니다. 실패 메시지에 별도 ACK 
 
 ## HTTP 메시지 복구
 
-- 재연결 후 놓친 메시지는 HTTP `GET /api/chat-rooms/{chatRoomId}/messages`로 복구한다.
+### 기존 과거 이력 조회
+
+- HTTP `GET /api/chat-rooms/{chatRoomId}/messages`는 과거 이력 조회다. 재연결 누락 복구는 아래 sync 경로를 사용한다.
 - 페이지 크기는 20이며 정렬 키는 `(createdAt, chatMessageId)`다.
 - 최초 조회는 최신 메시지 20개를 선택하고 화면 표시를 위해 오래된 순서로 반환한다. 다음 페이지는 더 오래된 메시지를 반환한다.
 - `nextCursor`, `hasNext`를 제공한다.
 - 퇴장한 참가자의 조회 요청은 HTTP 403과 `CHAT_ALREADY_LEFT`를 반환한다. Frontend는 이 응답을 받으면 화면의 기존 메시지 목록을 제거하고 `이미 퇴장한 채팅방입니다.` 안내를 표시한다.
 - 채팅방 참가자가 아닌 사용자의 조회 요청은 기존 정책대로 HTTP 404 `CHAT_ROOM_NOT_FOUND`를 반환한다.
 - 퇴장한 참가자는 과거 메시지를 조회할 수 없지만 메시지 행은 퇴장 즉시 DB에서 삭제하지 않는다.
+
+### #330 DB 누락 복구
+
+- `GET /api/chat-rooms/{chatRoomId}/messages/sync`는 Bearer 인증과 기존 방 접근·입장·미퇴장·만료 검사를 적용하고 `Cache-Control: no-store`로 응답한다.
+- after/through 둘 다 생략: `messages=[]`, 방의 커밋 MAX ID 또는 0을 `throughMessageId`·`nextAfterMessageId`에 반환하고 `hasNext=false`로 최초 기준점을 제공한다.
+- `afterMessageId`만 지정: 해당 ID 이후부터 방의 커밋 MAX까지를 고정 범위로 정한다. `after < ID <= through`의 메시지를 ID 오름차순으로 최대 20개 반환한다.
+- 다음 페이지에는 응답 `nextAfterMessageId`를 after로, 처음 응답의 `throughMessageId`를 그대로 전달한다. 마지막 페이지에서는 `nextAfterMessageId=throughMessageId`다.
+- 응답은 `{message,data}`이며 data는 `{messages,throughMessageId,nextAfterMessageId,hasNext}`다. messages의 필드는 기존 history Message와 같다(`chatMessageId`, `clientMessageId`, `userId`, `nickname`, `content`, `createdAt`, `voteChoice`).
+- after 없는 through, 음수, after > through, through > 방 MAX는 HTTP 400 `INVALID_CURSOR`다. 숫자 형식·경로 검증 오류는 기존 입력 오류 계약을 따른다.
+- 최초 진입은 enter → DB 기준점 → 기존 history/detail → 기준점 이후 sync 순서다. 재연결에도 마지막 DB 확인 완료 지점을 유지하며 고정 상한까지 모두 읽고 상세 조회가 성공한 뒤 지점을 갱신한다.
+- live 최고 ID는 중간 메시지 수신의 근거가 아니므로 완료 지점에 사용하지 않는다. ID는 방 안에서 연속이지 않으며 같은 방 INSERT 전 참가자 잠금 조건을 유지한다.
+- DB 메시지 ID 및 사용자별 clientMessageId로 live·복구·과거 이력을 병합한다. 본인 메시지의 DB 저장 확인도 live ACK와 같은 전송 대기·retry 정리를 거친다. 별도 STOMP ACK destination을 추가하지 않는다.
+- visible/online 화면은 정상 약 15초+jitter 주기로 DB를 대조하고 실패 시 간격을 늘린다. 방·세션 변경 시 이전 요청을 취소한다. 이는 복구 시도 주기이며 최대 복구 시간 SLA가 아니다.
+
+## 전달 준비·장애·스케일인 (#330)
+
+- WebSocket 연결은 각 태스크에 남는다. 모든 CHAT 태스크는 같은 writer DB와 Redis, 동일 환경 채널을 사용해야 한다. Redis 채널은 `mulo:chat:<environment>:delivery:v1`이다.
+- ECS는 `CHAT_DELIVERY_ENABLED=true`가 필수다. Redis host/port/TLS/ACL 자격 증명과 `CHAT_DELIVERY_ENVIRONMENT`는 배포 설정에서 주입하고 자격 증명은 Secret으로 관리한다. 로컬의 비활성 모드는 기존 개발 동작을 유지한다.
+- 실제 구독 ACK와 발행 경로 5초 안정화 후 새 handshake/CONNECT를 허용한다. 구독 단절·처리 손실 시 소켓을 1012로 종료하고 재연결·DB 복구를 유도한다.
+- 종료 시 DRAINING으로 전환해 새 연결·SEND·HTTP 쓰기를 제한하고 소켓을 정리한다. 이미 진입한 SEND는 최대 20초, 전달 큐는 최대 10초 범위에서 기다린 후 Redis 자원을 정리한다. 읽기 요청과 DB 복구 GET은 차단하지 않는다.
+- `/health`는 공유 Redis 장애만으로 실패시키지 않는다. 별도 전달 ready 지표와 실패 카운터로 감시한다.
+- 최초 구형 로컬 전달/신형 Pub/Sub 전환은 점검 창에서 CHAT 버전을 맞춘 뒤 새 API에 의존하는 FE를 배포한다. 실제 ECS/ALB 종료 시간·Redis TLS/ACL·목표 동접 용량은 스테이징 검증 대상이며 이 명세 작성으로 AWS 설정이 적용되지는 않는다.
+- DB 커밋 후 발행 전 종료, 구독 단절로 놓친 DB 저장 메시지는 조회로 복구한다. Pub/Sub 자체 재전송·Outbox·exactly-once·미커밋 요청 자동 재전송은 제공하지 않는다. 이력·권한이 유지되고 조회가 성공해야 화면에 반영된다.
+- 방 이벤트 전체의 영속 재생 계약은 없다. 방 상세 재조회로 현재 상태를 대조하며, 과거 이벤트 이력 보장이 필요하면 별도 설계가 필요하다.
