@@ -24,6 +24,16 @@ jobs:
       cancel-in-progress: true
     # 테스트가 실제 MySQL(Flyway 마이그레이션 포함)을 쓴다.
     services:
+      # Redis fan-out 통합 테스트가 실제 구독·발행 경로를 검증한다.
+      redis:
+        image: redis:8.2.10
+        ports:
+          - 16401:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
       mysql:
         image: mysql:8.4
         env:
@@ -98,6 +108,16 @@ jobs:
     name: Chat CI dev release
     runs-on: ubuntu-latest
     services:
+      # Redis fan-out 통합 테스트가 실제 구독·발행 경로를 검증한다.
+      redis:
+        image: redis:8.2.10
+        ports:
+          - 16401:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
       mysql:
         image: mysql:8.4
         env:
