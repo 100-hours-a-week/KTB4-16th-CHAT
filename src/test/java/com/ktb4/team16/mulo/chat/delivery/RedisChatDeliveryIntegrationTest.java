@@ -25,8 +25,7 @@ class RedisChatDeliveryIntegrationTest {
         var properties =
                 new ChatRedisProperties(
                         "127.0.0.1",
-                        Integer.parseInt(
-                                System.getenv().getOrDefault("CHAT_TEST_REDIS_PORT", "16401")),
+                        requiredRedisPort(),
                         false,
                         null,
                         null,
@@ -95,5 +94,13 @@ class RedisChatDeliveryIntegrationTest {
         }
         assertThat(states).allMatch(ChatDeliveryLifecycle::isDraining);
         assertThat(closed.get()).isEqualTo(2);
+    }
+
+    /** 명시된 테스트 Redis 포트만 사용해 로컬 고정 포트에 의존하지 않는다. */
+    private static int requiredRedisPort() {
+        var configuredPort = System.getenv("CHAT_TEST_REDIS_PORT");
+        if (configuredPort == null || configuredPort.isBlank())
+            throw new IllegalStateException("CHAT_TEST_REDIS_PORT must be set");
+        return Integer.parseInt(configuredPort);
     }
 }
