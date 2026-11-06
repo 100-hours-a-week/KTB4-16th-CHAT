@@ -65,3 +65,5 @@ chat.delivery:
     environment: ${CHAT_DELIVERY_ENVIRONMENT:local}
     connect-timeout: 1s
     command-timeout: 500ms
+spring.lifecycle.timeout-per-shutdown-phase: 20s
+server.shutdown: graceful

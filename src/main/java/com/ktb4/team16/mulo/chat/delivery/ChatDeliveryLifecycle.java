@@ -1,64 +1,115 @@
 package com.ktb4.team16.mulo.chat.delivery;
 
-/** Redis 전달 준비와 장애 상태를 관리한다. */
+import java.time.Duration;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+/** 입력 gate와 실행 중 SEND 등록을 같은 모니터로 보호한다. */
 public final class ChatDeliveryLifecycle {
     public enum State {
         STARTING,
         READY,
         DEGRADED,
+        DRAINING,
         STOPPED
     }
 
     private volatile State state = State.STARTING;
+    private int activeSends;
     private volatile long failureEpoch;
     private final Runnable closeSockets;
 
-    /** 전달 장애 때 로컬 소켓을 복구용으로 종료하는 책임을 주입한다. */
+    /** 로컬 소켓을 복구용으로 종료하는 책임을 주입한다. */
     public ChatDeliveryLifecycle(Runnable closeSockets) {
         this.closeSockets = closeSockets;
     }
 
-    /** 새 연결과 SEND를 받을 수 있는지 반환한다. */
     public boolean isReady() {
         return state == State.READY;
     }
 
-    /** 자원 정리 후 상태 점검이 다시 연결을 열지 못하게 한다. */
-    public boolean isStopped() {
-        return state == State.STOPPED;
+    public boolean isDraining() {
+        return state == State.DRAINING || state == State.STOPPED;
     }
 
-    /** 현재 전달 상태를 반환한다. */
     public State state() {
         return state;
     }
 
-    /** 마지막 점검 이후 추가 장애 발생 여부를 비교할 번호를 반환한다. */
     public long failureEpoch() {
         return failureEpoch;
     }
 
-    /** 점검 중 새 장애가 없고 종료되지 않은 경우에만 입력을 허용한다. */
+    /** 구독 및 발행 경로가 안정된 경우에만 입력을 허용한다. */
     public synchronized boolean markReady(long observedFailureEpoch) {
-        if (isStopped() || failureEpoch != observedFailureEpoch) return false;
+        if (isDraining() || failureEpoch != observedFailureEpoch) return false;
         state = State.READY;
         return true;
     }
 
-    /** 반복 장애를 기록하되 소켓 종료는 정상 상태에서 이탈할 때만 실행한다. */
+    /** 동일 장애 상태에서 소켓 종료를 반복하지 않는다. */
     public void onDeliveryFailure() {
         boolean close;
         synchronized (this) {
             close = state == State.READY;
-            if (isStopped()) return;
+            if (isDraining()) return;
             state = State.DEGRADED;
             failureEpoch++;
         }
         if (close) closeSockets.run();
     }
 
-    /** 종료된 전달 자원을 다시 활성화하지 않는다. */
+    /** 종료 전환 후에는 복구 신호로 다시 READY가 되지 않는다. */
+    public void beginDrain() {
+        synchronized (this) {
+            if (isDraining()) return;
+            state = State.DRAINING;
+        }
+        closeSockets.run();
+    }
+
+    /** 입력 허용 검사와 진행 작업 등록을 원자적으로 수행한다. */
+    public synchronized SendLease acquireSend() {
+        if (!isReady()) throw new IllegalStateException("Chat delivery unavailable");
+        activeSends++;
+        return new SendLease();
+    }
+
+    public synchronized int inFlight() {
+        return activeSends;
+    }
+
+    /** 커밋 후 발행까지 포함한 SEND 완료를 제한 시간 동안 기다린다. */
+    public synchronized boolean awaitSends(Duration timeout) {
+        long end = System.nanoTime() + timeout.toNanos();
+        while (activeSends > 0) {
+            long remaining = end - System.nanoTime();
+            if (remaining <= 0) return false;
+            try {
+                java.util.concurrent.TimeUnit.NANOSECONDS.timedWait(this, remaining);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /** 종료가 완료된 자원을 다시 활성화하지 않는다. */
     public synchronized void stopped() {
         state = State.STOPPED;
+    }
+
+    /** 같은 SEND의 중복 정리로 카운터가 음수가 되지 않게 한다. */
+    public final class SendLease implements AutoCloseable {
+        private final AtomicBoolean closed = new AtomicBoolean();
+
+        @Override
+        public void close() {
+            if (closed.compareAndSet(false, true))
+                synchronized (ChatDeliveryLifecycle.this) {
+                    activeSends--;
+                    ChatDeliveryLifecycle.this.notifyAll();
+                }
+        }
     }
 }
