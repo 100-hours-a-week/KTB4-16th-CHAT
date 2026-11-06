@@ -8,18 +8,23 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 class ChatDeliveryLifecycleTest {
     @Test
-    void closesOnlyOnceOnRepeatedFailureAndCannotRestartAfterStop() {
+    void gatesNewSendsAndClosesOnlyOnceOnRepeatedFailure() {
         var closed = new AtomicInteger();
         var state = new ChatDeliveryLifecycle(closed::incrementAndGet);
         assertThat(state.isReady()).isFalse();
         state.markReady(state.failureEpoch());
+        var lease = state.acquireSend();
+        assertThat(state.inFlight()).isEqualTo(1);
         state.onDeliveryFailure();
         state.onDeliveryFailure();
         assertThat(closed.get()).isEqualTo(1);
-        assertThat(state.isReady()).isFalse();
+        assertThatThrownBy(state::acquireSend).isInstanceOf(IllegalStateException.class);
+        lease.close();
+        lease.close();
+        assertThat(state.inFlight()).isZero();
         state.markReady(state.failureEpoch());
-        state.stopped();
-        assertThat(state.isStopped()).isTrue();
+        state.beginDrain();
+        assertThat(state.isDraining()).isTrue();
         state.markReady(state.failureEpoch());
         assertThat(state.isReady()).isFalse();
     }

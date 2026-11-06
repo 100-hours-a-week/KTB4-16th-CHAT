@@ -7,6 +7,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 
 import org.springframework.messaging.simp.user.SimpUserRegistry;
 
+import java.time.Duration;
 import java.util.concurrent.*;
 
 /** Redis 수신 스레드와 분리된 방별 직렬 처리기로 로컬 연결에만 보낸다. */
@@ -92,9 +93,23 @@ public final class ChatLocalDeliveryDispatcher {
         }
     }
 
-    /** Redis 연결 소유자 종료 시 로컬 전달 워커를 정리한다. */
-    public void stop() {
-        for (var stripe : stripes) stripe.shutdownNow();
+    /** 기존 큐 작업을 제한 시간 동안 배출하고 미완료 작업은 DB 복구에 맡긴다. */
+    public boolean drain(Duration timeout) {
+        long end = System.nanoTime() + timeout.toNanos();
+        boolean complete = true;
+        for (var stripe : stripes) stripe.shutdown();
+        for (var stripe : stripes) {
+            try {
+                complete &=
+                        stripe.awaitTermination(
+                                Math.max(0, end - System.nanoTime()), TimeUnit.NANOSECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                complete = false;
+            }
+            if (!stripe.isTerminated()) stripe.shutdownNow();
+        }
+        return complete;
     }
 
     /** 상태 복구 전 큐 적체 여부를 검사한다. */
