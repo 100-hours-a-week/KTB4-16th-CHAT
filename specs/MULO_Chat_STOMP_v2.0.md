@@ -7,7 +7,7 @@
 - Chat Server 전용 로그인은 없다. 사용자 인증은 Backend Access Token 검증 결과를 사용한다.
 - 채팅방은 매칭된 두 명만 참여하는 1:1 구조다.
 - 메시지는 Chat Server MySQL에 저장한다. #330에서는 DB COMMIT 성공 후 Redis Pub/Sub으로 태스크 간 전달하고 각 태스크가 로컬 접속자에게 전송한다.
-- 추가 계약의 기준은 [CHAT #36](https://github.com/100-hours-a-week/KTB4-16th-CHAT/pull/36) / [FE #147](https://github.com/100-hours-a-week/KTB4-16th-FE/pull/147)이며 기능 PR 미병합·운영 미배포 상태다. 기존 payload·user destination·인증 및 참가자 권한은 유지한다.
+- 추가 계약은 DB 복구 [CHAT #36](https://github.com/100-hours-a-week/KTB4-16th-CHAT/pull/36), Redis 전달 [CHAT #38](https://github.com/100-hours-a-week/KTB4-16th-CHAT/pull/38), 스케일인 [CHAT #39](https://github.com/100-hours-a-week/KTB4-16th-CHAT/pull/39)의 develop 반영 구현을 기준으로 한다(2026-11-06 KST). 클라이언트 복구 [FE #147](https://github.com/100-hours-a-week/KTB4-16th-FE/pull/147)은 미병합이며 운영 배포는 별도 확인 대상이다. 기존 payload·user destination·인증 및 참가자 권한은 유지한다.
 
 ## 연결 및 인증
 
@@ -176,9 +176,11 @@ STOMP 오류는 HTTP 상태 코드가 아니다. 실패 메시지에 별도 ACK 
 
 - WebSocket 연결은 각 태스크에 남는다. 모든 CHAT 태스크는 같은 writer DB와 Redis, 동일 환경 채널을 사용해야 한다. Redis 채널은 `mulo:chat:<environment>:delivery:v1`이다.
 - ECS는 `CHAT_DELIVERY_ENABLED=true`가 필수다. Redis host/port/TLS/ACL 자격 증명과 `CHAT_DELIVERY_ENVIRONMENT`는 배포 설정에서 주입하고 자격 증명은 Secret으로 관리한다. 로컬의 비활성 모드는 기존 개발 동작을 유지한다.
-- 실제 구독 ACK와 발행 경로 5초 안정화 후 새 handshake/CONNECT를 허용한다. 구독 단절·처리 손실 시 소켓을 1012로 종료하고 재연결·DB 복구를 유도한다.
-- 종료 시 DRAINING으로 전환해 새 연결·SEND·HTTP 쓰기를 제한하고 소켓을 정리한다. 이미 진입한 SEND는 최대 20초, 전달 큐는 최대 10초 범위에서 기다린 후 Redis 자원을 정리한다. 읽기 요청과 DB 복구 GET은 차단하지 않는다.
-- `/health`는 공유 Redis 장애만으로 실패시키지 않는다. 별도 전달 ready 지표와 실패 카운터로 감시한다.
+- 구독 ACK·발행 연결 PING 성공·로컬 전달 큐가 빈 상태를 5초간 확인한 뒤 새 handshake/CONNECT를 허용한다. 이는 실제 PUBLISH 권한이나 브라우저 수신 ACK를 검증하는 조건은 아니다. READY 중 구독 단절·처리 손실이 발생하면 로컬 소켓에 1012 종료를 요청해 재연결·DB 복구를 유도한다.
+- ContextClosedEvent에서 DRAINING으로 전환한다. 새 handshake는 HTTP 503, CONNECT는 기존 인증 서비스 일시 불가 오류, SEND는 CHAT_DELIVERY_UNAVAILABLE로 거절하고 로컬 소켓에 1012 종료를 요청한다. HTTP 필터는 GET·HEAD·OPTIONS 외 요청에 HTTP 503과 CHAT_DELIVERY_UNAVAILABLE을 반환한다. 이미 실행 중인 HTTP 요청을 일괄 취소하지 않는다.
+- SEND 허용 검사와 진행 수 등록은 같은 동기화 구역에서 수행한다. 등록한 SEND는 검수·DB 커밋·AFTER_COMMIT 발행을 마친 후 해제하며 종료 시 최대 20초 기다린다. 이후 네 전달 큐를 공통 10초 기한으로 정리하고 미완료 작업에 중단을 요청한 뒤 Redis 연결을 닫는다. 기한 내 완료나 브라우저 수신을 보장하지 않는다.
+- 읽기 요청과 DB 복구 GET은 종료 필터가 허용한다. 웹 서버가 새 요청 접수를 중단할 수 있으므로 종료 태스크의 GET 가용성을 보장하지 않으며 클라이언트는 살아 있는 태스크에서 복구해야 한다. server.shutdown=graceful과 Spring 단계별 대기 20초는 전체 ECS 종료 시간 보장이 아니다.
+- `/health`는 DRAINING·STOPPED에서 503이며 STARTING·DEGRADED에서는 200이다. 공유 Redis 장애만으로 실패시키지 않으며 `/actuator/health`의 계약을 바꾸지 않는다. 별도 전달 ready 지표와 실패 카운터로 감시한다.
 - 최초 구형 로컬 전달/신형 Pub/Sub 전환은 점검 창에서 CHAT 버전을 맞춘 뒤 새 API에 의존하는 FE를 배포한다. 실제 ECS/ALB 종료 시간·Redis TLS/ACL·목표 동접 용량은 스테이징 검증 대상이며 이 명세 작성으로 AWS 설정이 적용되지는 않는다.
 - DB 커밋 후 발행 전 종료, 구독 단절로 놓친 DB 저장 메시지는 조회로 복구한다. Pub/Sub 자체 재전송·Outbox·exactly-once·미커밋 요청 자동 재전송은 제공하지 않는다. 이력·권한이 유지되고 조회가 성공해야 화면에 반영된다.
 - 방 이벤트 전체의 영속 재생 계약은 없다. 방 상세 재조회로 현재 상태를 대조하며, 과거 이벤트 이력 보장이 필요하면 별도 설계가 필요하다.
