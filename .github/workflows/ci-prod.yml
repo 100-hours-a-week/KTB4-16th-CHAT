@@ -28,7 +28,7 @@ jobs:
       redis:
         image: redis:8.2.10
         ports:
-          - 16401:6379
+          - 6379/tcp
         options: >-
           --health-cmd="redis-cli ping"
           --health-interval=5s
@@ -77,6 +77,7 @@ jobs:
       - name: Run Tests
         env:
           CHAT_DB_URL: jdbc:mysql://127.0.0.1:3308/mulo_chat?serverTimezone=Asia/Seoul&characterEncoding=utf8&useUnicode=true
+          CHAT_TEST_REDIS_PORT: ${{ job.services.redis.ports['6379'] }}
           CHAT_DB_USERNAME: mulo_chat
           CHAT_DB_PASSWORD: ci-test-password
           CHAT_BACKEND_URL: http://localhost:8080
@@ -112,7 +113,7 @@ jobs:
       redis:
         image: redis:8.2.10
         ports:
-          - 16401:6379
+          - 6379/tcp
         options: >-
           --health-cmd="redis-cli ping"
           --health-interval=5s
@@ -167,6 +168,7 @@ jobs:
       - name: Run Tests
         env:
           CHAT_DB_URL: jdbc:mysql://127.0.0.1:3308/mulo_chat?serverTimezone=Asia/Seoul&characterEncoding=utf8&useUnicode=true
+          CHAT_TEST_REDIS_PORT: ${{ job.services.redis.ports['6379'] }}
           CHAT_DB_USERNAME: mulo_chat
           CHAT_DB_PASSWORD: ci-test-password
           CHAT_BACKEND_URL: http://localhost:8080
