@@ -24,16 +24,6 @@ jobs:
       cancel-in-progress: true
     # 테스트가 실제 MySQL(Flyway 마이그레이션 포함)을 쓴다.
     services:
-      # Redis fan-out 통합 테스트가 실제 구독·발행 경로를 검증한다.
-      redis:
-        image: redis:8.2.10
-        ports:
-          - 6379/tcp
-        options: >-
-          --health-cmd="redis-cli ping"
-          --health-interval=5s
-          --health-timeout=5s
-          --health-retries=20
       mysql:
         image: mysql:8.4
         env:
@@ -77,7 +67,6 @@ jobs:
       - name: Run Tests
         env:
           CHAT_DB_URL: jdbc:mysql://127.0.0.1:3308/mulo_chat?serverTimezone=Asia/Seoul&characterEncoding=utf8&useUnicode=true
-          CHAT_TEST_REDIS_PORT: ${{ job.services.redis.ports['6379'] }}
           CHAT_DB_USERNAME: mulo_chat
           CHAT_DB_PASSWORD: ci-test-password
           CHAT_BACKEND_URL: http://localhost:8080
@@ -109,16 +98,6 @@ jobs:
     name: Chat CI dev release
     runs-on: ubuntu-latest
     services:
-      # Redis fan-out 통합 테스트가 실제 구독·발행 경로를 검증한다.
-      redis:
-        image: redis:8.2.10
-        ports:
-          - 6379/tcp
-        options: >-
-          --health-cmd="redis-cli ping"
-          --health-interval=5s
-          --health-timeout=5s
-          --health-retries=20
       mysql:
         image: mysql:8.4
         env:
@@ -168,7 +147,6 @@ jobs:
       - name: Run Tests
         env:
           CHAT_DB_URL: jdbc:mysql://127.0.0.1:3308/mulo_chat?serverTimezone=Asia/Seoul&characterEncoding=utf8&useUnicode=true
-          CHAT_TEST_REDIS_PORT: ${{ job.services.redis.ports['6379'] }}
           CHAT_DB_USERNAME: mulo_chat
           CHAT_DB_PASSWORD: ci-test-password
           CHAT_BACKEND_URL: http://localhost:8080
