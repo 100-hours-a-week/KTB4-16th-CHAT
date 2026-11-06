@@ -43,6 +43,14 @@ public class ChatDeliveryConfiguration {
                                                                     "Chat service recovery"))));
         }
 
+        /** 웹 서버 graceful 정리보다 먼저 새로운 작업을 차단한다. */
+        @Bean
+        org.springframework.context.ApplicationListener<
+                        org.springframework.context.event.ContextClosedEvent>
+                chatDrainOnContextClose(ChatDeliveryLifecycle lifecycle) {
+            return event -> lifecycle.beginDrain();
+        }
+
         @Bean
         ChatDeliveryCodec chatDeliveryCodec(JsonMapper mapper) {
             return new ChatDeliveryCodec(mapper);

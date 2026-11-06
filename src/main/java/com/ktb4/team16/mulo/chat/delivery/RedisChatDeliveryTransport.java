@@ -75,7 +75,7 @@ public final class RedisChatDeliveryTransport implements ChatDeliveryPublisher, 
 
     /** Redis 구독과 writer 접근이 안정적으로 복구되었는지 확인한다. */
     private void probe() {
-        if (!running || lifecycle.isStopped()) return;
+        if (!running || lifecycle.isDraining()) return;
         try {
             if (publisher == null) {
                 publisher = client.connect();
@@ -151,19 +151,21 @@ public final class RedisChatDeliveryTransport implements ChatDeliveryPublisher, 
         }
     }
 
-    /** 애플리케이션 종료 시 상태 점검·워커·Redis 연결을 정리한다. */
+    /** 실행 중 SEND와 큐를 기다린 뒤 연결을 닫아 afterCommit 종료 경합을 줄인다. */
     @Override
     public void stop() {
         if (!running) return;
+        lifecycle.beginDrain();
+        lifecycle.awaitSends(Duration.ofSeconds(20));
         running = false;
-        lifecycle.stopped();
         monitor.shutdownNow();
-        dispatcher.stop();
+        dispatcher.drain(Duration.ofSeconds(10));
         var sub = subscriber;
         if (sub != null) sub.close();
         var pub = publisher;
         if (pub != null) pub.close();
         client.shutdown(Duration.ZERO, Duration.ofSeconds(2));
+        lifecycle.stopped();
     }
 
     @Override

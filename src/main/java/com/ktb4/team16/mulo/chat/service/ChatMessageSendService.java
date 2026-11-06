@@ -45,16 +45,26 @@ public class ChatMessageSendService {
         this.moderationClient = moderationClient;
     }
 
-    /** Redis 전달이 준비된 경우에만 기존 SEND 처리를 실행한다. */
+    /** 상태 검사와 진행 카운터 등록을 묶어 종료와 새 SEND의 경합을 막는다. */
     public void send(Long chatRoomId, Long userId, ChatMessageSendRequest request) {
         var state = deliveryLifecycle == null ? null : deliveryLifecycle.getIfAvailable();
-        if (state != null && !state.isReady())
-            throw new ChatMessageSendException(
-                    ChatErrorCode.CHAT_DELIVERY_UNAVAILABLE, request.clientMessageId());
-        sendAccepted(chatRoomId, userId, request);
+        com.ktb4.team16.mulo.chat.delivery.ChatDeliveryLifecycle.SendLease lease = null;
+        if (state != null) {
+            try {
+                lease = state.acquireSend();
+            } catch (IllegalStateException error) {
+                throw new ChatMessageSendException(
+                        ChatErrorCode.CHAT_DELIVERY_UNAVAILABLE, request.clientMessageId());
+            }
+        }
+        try {
+            sendAccepted(chatRoomId, userId, request);
+        } finally {
+            if (lease != null) lease.close();
+        }
     }
 
-    /** 허용된 SEND의 moderation·DB commit·AFTER_COMMIT 전파를 완료한다. */
+    /** 획득된 SEND의 moderation·DB commit·AFTER_COMMIT 전파를 완료한다. */
     private void sendAccepted(Long chatRoomId, Long userId, ChatMessageSendRequest request) {
         if (chatRoomId == null || chatRoomId <= 0) {
             ChatSendDiagnostic diagnostic =
