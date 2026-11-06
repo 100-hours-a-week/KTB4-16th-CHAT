@@ -4,7 +4,8 @@ import com.ktb4.team16.mulo.chat.auth.security.RequiredAllowedOriginHandshakeInt
 import com.ktb4.team16.mulo.chat.auth.security.SafeStompSubProtocolErrorHandler;
 import com.ktb4.team16.mulo.chat.auth.security.StompConnectAuthenticationInterceptor;
 import com.ktb4.team16.mulo.chat.auth.session.WebSocketSessionRegistry;
-
+import java.util.Arrays;
+import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -18,9 +19,6 @@ import org.springframework.web.socket.config.annotation.StompEndpointRegistry;
 import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerConfigurer;
 import org.springframework.web.socket.config.annotation.WebSocketTransportRegistration;
 
-import java.util.Arrays;
-import java.util.List;
-
 @Configuration
 @EnableWebSocketMessageBroker
 public class ChatWebSocketConfiguration implements WebSocketMessageBrokerConfigurer {
@@ -30,15 +28,11 @@ public class ChatWebSocketConfiguration implements WebSocketMessageBrokerConfigu
     private final WebSocketSessionRegistry sessionRegistry;
     private TaskScheduler messageBrokerTaskScheduler;
 
-    @Autowired
-    private org.springframework.beans.factory.ObjectProvider<
-                    com.ktb4.team16.mulo.chat.delivery.ChatDeliveryLifecycle>
-            deliveryLifecycle;
-
     public ChatWebSocketConfiguration(
             @Value("${chat.websocket.allowed-origins:}") String allowedOrigins,
             StompConnectAuthenticationInterceptor authenticationInterceptor,
-            WebSocketSessionRegistry sessionRegistry) {
+            WebSocketSessionRegistry sessionRegistry
+    ) {
         this.allowedOrigins = allowedOrigins;
         this.authenticationInterceptor = authenticationInterceptor;
         this.sessionRegistry = sessionRegistry;
@@ -47,30 +41,23 @@ public class ChatWebSocketConfiguration implements WebSocketMessageBrokerConfigu
     // Spring 메시지 브로커의 스케줄러를 지연 주입해 Heartbeat에 사용합니다.
     @Autowired
     public void setMessageBrokerTaskScheduler(
-            @Lazy @Qualifier("messageBrokerTaskScheduler")
-                    TaskScheduler messageBrokerTaskScheduler) {
+            @Lazy @Qualifier("messageBrokerTaskScheduler") TaskScheduler messageBrokerTaskScheduler
+    ) {
         this.messageBrokerTaskScheduler = messageBrokerTaskScheduler;
     }
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        List<String> origins =
-                Arrays.stream(allowedOrigins.split(","))
-                        .map(String::trim)
-                        .filter(origin -> !origin.isEmpty())
-                        .toList();
-        if (origins.isEmpty()
-                || origins.stream()
-                        .anyMatch(origin -> origin.equals("*") || origin.contains("*"))) {
-            throw new IllegalStateException(
-                    "CHAT_WS_ALLOWED_ORIGINS must contain explicit origins.");
+        List<String> origins = Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(origin -> !origin.isEmpty())
+                .toList();
+        if (origins.isEmpty() || origins.stream().anyMatch(origin -> origin.equals("*")
+                || origin.contains("*"))) {
+            throw new IllegalStateException("CHAT_WS_ALLOWED_ORIGINS must contain explicit origins.");
         }
         var endpoint = registry.addEndpoint("/ws");
         endpoint.addInterceptors(new RequiredAllowedOriginHandshakeInterceptor(origins));
-        if (deliveryLifecycle != null)
-            endpoint.addInterceptors(
-                    new com.ktb4.team16.mulo.chat.delivery.ChatDeliveryHandshakeInterceptor(
-                            deliveryLifecycle));
         endpoint.setAllowedOrigins(origins.toArray(String[]::new));
         registry.setErrorHandler(new SafeStompSubProtocolErrorHandler());
     }

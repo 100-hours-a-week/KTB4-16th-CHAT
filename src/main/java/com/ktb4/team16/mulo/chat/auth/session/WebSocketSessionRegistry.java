@@ -1,7 +1,13 @@
 package com.ktb4.team16.mulo.chat.auth.session;
 
 import com.ktb4.team16.mulo.chat.auth.exception.StompAuthenticationException;
-
+import java.io.IOException;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledFuture;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.TaskScheduler;
@@ -13,14 +19,6 @@ import org.springframework.web.socket.handler.WebSocketHandlerDecorator;
 import org.springframework.web.socket.handler.WebSocketHandlerDecoratorFactory;
 import org.springframework.web.socket.handler.WebSocketSessionDecorator;
 
-import java.io.IOException;
-import java.time.Clock;
-import java.time.Duration;
-import java.time.Instant;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ScheduledFuture;
-
 @Component
 public class WebSocketSessionRegistry {
 
@@ -29,79 +27,67 @@ public class WebSocketSessionRegistry {
     private final ObjectProvider<TaskScheduler> taskSchedulerProvider;
     private final Clock clock;
     private final Map<String, WebSocketSession> sessions = new ConcurrentHashMap<>();
-    private final Map<String, AuthenticatedSession> authenticatedSessions =
-            new ConcurrentHashMap<>();
+    private final Map<String, AuthenticatedSession> authenticatedSessions = new ConcurrentHashMap<>();
     private final Map<String, PendingDisconnect> pendingDisconnects = new ConcurrentHashMap<>();
 
     public WebSocketSessionRegistry(
-            @Qualifier("messageBrokerTaskScheduler")
-                    ObjectProvider<TaskScheduler> taskSchedulerProvider,
-            Clock clock) {
+            @Qualifier("messageBrokerTaskScheduler") ObjectProvider<TaskScheduler> taskSchedulerProvider,
+            Clock clock
+    ) {
         this.taskSchedulerProvider = taskSchedulerProvider;
         this.clock = clock;
     }
 
     public WebSocketHandlerDecoratorFactory decoratorFactory() {
-        return handler ->
-                new WebSocketHandlerDecorator(handler) {
-                    private final Map<String, WebSocketSession> decoratedSessions =
-                            new ConcurrentHashMap<>();
+        return handler -> new WebSocketHandlerDecorator(handler) {
+            private final Map<String, WebSocketSession> decoratedSessions = new ConcurrentHashMap<>();
 
-                    @Override
-                    public void afterConnectionEstablished(WebSocketSession session)
-                            throws Exception {
-                        WebSocketSession decoratedSession = decorate(session);
-                        sessions.put(session.getId(), decoratedSession);
-                        try {
-                            super.afterConnectionEstablished(decoratedSession);
-                        } catch (Exception exception) {
-                            remove(session.getId());
-                            decoratedSessions.remove(session.getId(), decoratedSession);
-                            throw exception;
-                        }
-                    }
+            @Override
+            public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+                WebSocketSession decoratedSession = decorate(session);
+                sessions.put(session.getId(), decoratedSession);
+                try {
+                    super.afterConnectionEstablished(decoratedSession);
+                } catch (Exception exception) {
+                    remove(session.getId());
+                    decoratedSessions.remove(session.getId(), decoratedSession);
+                    throw exception;
+                }
+            }
 
-                    @Override
-                    public void handleMessage(
-                            WebSocketSession session,
-                            org.springframework.web.socket.WebSocketMessage<?> message)
-                            throws Exception {
-                        super.handleMessage(decorate(session), message);
-                    }
+            @Override
+            public void handleMessage(WebSocketSession session, org.springframework.web.socket.WebSocketMessage<?> message)
+                    throws Exception {
+                super.handleMessage(decorate(session), message);
+            }
 
-                    @Override
-                    public void handleTransportError(WebSocketSession session, Throwable exception)
-                            throws Exception {
-                        super.handleTransportError(decorate(session), exception);
-                    }
+            @Override
+            public void handleTransportError(WebSocketSession session, Throwable exception) throws Exception {
+                super.handleTransportError(decorate(session), exception);
+            }
 
-                    @Override
-                    public void afterConnectionClosed(
-                            WebSocketSession session, CloseStatus closeStatus) throws Exception {
-                        remove(session.getId());
-                        WebSocketSession decoratedSession =
-                                decoratedSessions.remove(session.getId());
-                        super.afterConnectionClosed(
-                                decoratedSession == null ? session : decoratedSession, closeStatus);
-                    }
+            @Override
+            public void afterConnectionClosed(WebSocketSession session, CloseStatus closeStatus) throws Exception {
+                remove(session.getId());
+                WebSocketSession decoratedSession = decoratedSessions.remove(session.getId());
+                super.afterConnectionClosed(
+                        decoratedSession == null ? session : decoratedSession,
+                        closeStatus
+                );
+            }
 
-                    private WebSocketSession decorate(WebSocketSession session) {
-                        return decoratedSessions.computeIfAbsent(
-                                session.getId(),
-                                ignored ->
-                                        new WebSocketSessionDecorator(session) {
-                                            @Override
-                                            public void sendMessage(
-                                                    org.springframework.web.socket.WebSocketMessage<
-                                                                    ?>
-                                                            message)
-                                                    throws IOException {
-                                                super.sendMessage(message);
-                                                handleOutboundMessage(getId(), message);
-                                            }
-                                        });
-                    }
-                };
+            private WebSocketSession decorate(WebSocketSession session) {
+                return decoratedSessions.computeIfAbsent(session.getId(), ignored ->
+                        new WebSocketSessionDecorator(session) {
+                            @Override
+                            public void sendMessage(org.springframework.web.socket.WebSocketMessage<?> message)
+                                    throws IOException {
+                                super.sendMessage(message);
+                                handleOutboundMessage(getId(), message);
+                            }
+                        });
+            }
+        };
     }
 
     public synchronized void authenticate(String sessionId, Instant expiresAt) {
@@ -115,10 +101,7 @@ public class WebSocketSessionRegistry {
         }
         ScheduledFuture<?> expiryTask;
         try {
-            expiryTask =
-                    taskSchedulerProvider
-                            .getObject()
-                            .schedule(() -> expire(sessionId, current), expiresAt);
+            expiryTask = taskSchedulerProvider.getObject().schedule(() -> expire(sessionId, current), expiresAt);
         } catch (RuntimeException exception) {
             authenticatedSessions.remove(sessionId, current);
             throw StompAuthenticationException.authServiceUnavailable();
@@ -132,9 +115,7 @@ public class WebSocketSessionRegistry {
 
     public boolean isAuthenticated(String sessionId) {
         AuthenticatedSession session = authenticatedSessions.get(sessionId);
-        return session != null
-                && session.expiresAt().isAfter(clock.instant())
-                && session.session().isOpen();
+        return session != null && session.expiresAt().isAfter(clock.instant()) && session.session().isOpen();
     }
 
     public synchronized void disconnect(String sessionId, String receiptId) {
@@ -150,12 +131,10 @@ public class WebSocketSessionRegistry {
         PendingDisconnect pending = new PendingDisconnect(receiptId);
         pendingDisconnects.put(sessionId, pending);
         try {
-            ScheduledFuture<?> closeTask =
-                    taskSchedulerProvider
-                            .getObject()
-                            .schedule(
-                                    () -> closeAfterDisconnect(sessionId, pending),
-                                    clock.instant().plus(DISCONNECT_CLOSE_TIMEOUT));
+            ScheduledFuture<?> closeTask = taskSchedulerProvider.getObject().schedule(
+                    () -> closeAfterDisconnect(sessionId, pending),
+                    clock.instant().plus(DISCONNECT_CLOSE_TIMEOUT)
+            );
             if (closeTask == null) {
                 throw new IllegalStateException("Unable to schedule WebSocket close.");
             }
@@ -180,14 +159,12 @@ public class WebSocketSessionRegistry {
         }
     }
 
-    private void handleOutboundMessage(
-            String sessionId, org.springframework.web.socket.WebSocketMessage<?> message) {
+    private void handleOutboundMessage(String sessionId, org.springframework.web.socket.WebSocketMessage<?> message) {
         if (!(message instanceof TextMessage textMessage)) {
             return;
         }
         PendingDisconnect pending = pendingDisconnects.get(sessionId);
-        if (pending != null
-                && pending.receiptId() != null
+        if (pending != null && pending.receiptId() != null
                 && isStompReceipt(textMessage.getPayload(), pending.receiptId())) {
             closeAfterDisconnect(sessionId, pending);
         }
@@ -247,18 +224,6 @@ public class WebSocketSessionRegistry {
         PendingDisconnect pending = pendingDisconnects.remove(sessionId);
         if (pending != null && pending.closeTask() != null) {
             pending.closeTask().cancel(false);
-        }
-    }
-
-    /** 전역 모니터 밖에서 소켓을 닫고 만료·종료 예약까지 정리한다. */
-    public void closeAllForRecovery(CloseStatus status) {
-        for (WebSocketSession session : java.util.List.copyOf(sessions.values())) {
-            try {
-                session.close(status);
-            } catch (IOException ignored) {
-            } finally {
-                remove(session.getId());
-            }
         }
     }
 

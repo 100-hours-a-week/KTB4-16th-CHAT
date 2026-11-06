@@ -3,8 +3,6 @@ package com.ktb4.team16.mulo.chat.exception;
 import org.springframework.http.HttpStatus;
 
 public enum ChatErrorCode {
-    CHAT_DELIVERY_UNAVAILABLE(
-            HttpStatus.SERVICE_UNAVAILABLE, "현재 채팅 연결을 복구하고 있습니다. 잠시 후 다시 시도해 주세요."),
     UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "인증이 필요합니다."),
     FORBIDDEN(HttpStatus.FORBIDDEN, "접근 권한이 없습니다."),
     AUTH_SERVICE_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "인증 서비스를 일시적으로 이용할 수 없습니다."),
@@ -21,8 +19,7 @@ public enum ChatErrorCode {
     SPAM_DETECTED(HttpStatus.BAD_REQUEST, "스팸으로 의심되는 메시지는 전송할 수 없어요."),
     MESSAGE_BLOCKED(HttpStatus.BAD_REQUEST, "부적절한 내용이 포함되어 메시지를 전송할 수 없어요."),
     MODERATION_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "현재 메시지를 전송할 수 없어요. 잠시 후 다시 시도해 주세요."),
-    CHAT_ROOM_CREATE_EXPIRED(
-            HttpStatus.CONFLICT, "CHAT_ROOM_EXPIRED", "만료된 매칭은 새 채팅방을 생성할 수 없습니다."),
+    CHAT_ROOM_CREATE_EXPIRED(HttpStatus.CONFLICT, "CHAT_ROOM_EXPIRED", "만료된 매칭은 새 채팅방을 생성할 수 없습니다."),
     CHAT_ROOM_CONFLICT(HttpStatus.CONFLICT, "동일 매칭 ID의 채팅방 정보가 기존 요청과 다릅니다."),
     CHAT_GROUP_ASSIGNMENT_CONFLICT(HttpStatus.CONFLICT, "이미 배정된 그룹 채팅 정보가 요청과 다릅니다."),
     CLIENT_MESSAGE_ID_CONFLICT(HttpStatus.CONFLICT, "이미 다른 메시지에 사용된 clientMessageId입니다."),
