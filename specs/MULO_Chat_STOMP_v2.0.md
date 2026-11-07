@@ -7,7 +7,7 @@
 - Chat Server 전용 로그인은 없다. 사용자 인증은 Backend Access Token 검증 결과를 사용한다.
 - 채팅방은 매칭된 두 명만 참여하는 1:1 구조다.
 - 메시지는 Chat Server MySQL에 저장한다. #330에서는 DB COMMIT 성공 후 Redis Pub/Sub으로 태스크 간 전달하고 각 태스크가 로컬 접속자에게 전송한다.
-- 추가 계약은 DB 복구 [CHAT #36](https://github.com/100-hours-a-week/KTB4-16th-CHAT/pull/36), Redis 전달 [CHAT #38](https://github.com/100-hours-a-week/KTB4-16th-CHAT/pull/38), 스케일인 [CHAT #39](https://github.com/100-hours-a-week/KTB4-16th-CHAT/pull/39)의 develop 반영 구현을 기준으로 한다(2026-11-06 KST). 클라이언트 복구 [FE #147](https://github.com/100-hours-a-week/KTB4-16th-FE/pull/147)은 미병합이며 운영 배포는 별도 확인 대상이다. 기존 payload·user destination·인증 및 참가자 권한은 유지한다.
+- 추가 계약은 DB 복구 [CHAT #36](https://github.com/100-hours-a-week/KTB4-16th-CHAT/pull/36), Redis 전달 [CHAT #38](https://github.com/100-hours-a-week/KTB4-16th-CHAT/pull/38), 스케일인 [CHAT #39](https://github.com/100-hours-a-week/KTB4-16th-CHAT/pull/39)의 develop 반영 구현을 기준으로 한다(2026-11-06 KST). 클라이언트 복구 [FE #147](https://github.com/100-hours-a-week/KTB4-16th-FE/pull/147)은 FE develop에 병합되었다(2026-11-06 KST). 운영 배포는 별도 확인 대상이다. 기존 payload·user destination·인증 및 참가자 권한은 유지한다.
 
 ## 연결 및 인증
 
