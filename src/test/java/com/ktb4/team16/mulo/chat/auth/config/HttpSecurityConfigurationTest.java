@@ -12,8 +12,6 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.ktb4.team16.mulo.chat.auth.dto.BackendAuthResponse;
 import com.ktb4.team16.mulo.chat.auth.service.BackendTokenVerifier;
-import com.ktb4.team16.mulo.chat.dto.response.CreateChatRoomResponse;
-import com.ktb4.team16.mulo.chat.service.ChatRoomCreateService;
 import com.ktb4.team16.mulo.chat.dto.response.GroupChatJoinOrCreateResponse;
 import com.ktb4.team16.mulo.chat.service.GroupChatRoomJoinService;
 import java.time.OffsetDateTime;
@@ -37,9 +35,6 @@ class HttpSecurityConfigurationTest {
 
     @MockitoBean
     private BackendTokenVerifier tokenVerifier;
-
-    @MockitoBean
-    private ChatRoomCreateService chatRoomCreateService;
 
     @MockitoBean
     private GroupChatRoomJoinService groupChatRoomJoinService;
@@ -69,8 +64,9 @@ class HttpSecurityConfigurationTest {
                 .andExpect(status().isUnauthorized());
     }
 
+    // 제거된 2인 생성 경로가 내부 API 인증 뒤에도 노출되지 않는지 검증한다.
     @Test
-    void protectsInternalChatRoomCreationAndReturnsCreatedOrIdempotentStatus() throws Exception {
+    void returnsNotFoundForRemovedDirectChatRoomCreation() throws Exception {
         String request = """
                 {"matchId": 50, "expiresAt": "2026-10-14T00:00:00+09:00", "participants": [
                   {"userId": 17, "nickname": "jettie"}, {"userId": 28, "nickname": "lulu"}]}
@@ -78,33 +74,22 @@ class HttpSecurityConfigurationTest {
         mockMvc.perform(post("/internal/chat-rooms").contentType(APPLICATION_JSON).content(request))
                 .andExpect(status().isUnauthorized());
 
-        when(chatRoomCreateService.create(any())).thenReturn(
-                new ChatRoomCreateService.Result(new CreateChatRoomResponse(30L), true));
         mockMvc.perform(post("/internal/chat-rooms")
                         .header("X-Internal-Api-Key", "test-internal-key")
                         .contentType(APPLICATION_JSON)
                         .content(request))
-                .andExpect(status().isCreated())
-                .andExpect(jsonPath("$.chatRoomId").value(30));
-
-        when(chatRoomCreateService.create(any())).thenReturn(
-                new ChatRoomCreateService.Result(new CreateChatRoomResponse(30L), false));
-        mockMvc.perform(post("/internal/chat-rooms")
-                        .header("X-Internal-Api-Key", "test-internal-key")
-                        .contentType(APPLICATION_JSON)
-                        .content(request))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.chatRoomId").value(30));
+                .andExpect(status().isNotFound());
     }
 
+    // 제거된 경로에는 이전 요청 검증도 적용되지 않는지 확인한다.
     @Test
-    void validatesInternalChatRoomCreationPayloadBeforeCallingService() throws Exception {
+    void returnsNotFoundForRemovedDirectChatRoomCreationWithInvalidPayload() throws Exception {
         mockMvc.perform(post("/internal/chat-rooms")
                         .header("X-Internal-Api-Key", "test-internal-key")
                         .contentType(APPLICATION_JSON)
                         .content("{\"matchId\":50,\"expiresAt\":\"2026-10-14T00:00:00+09:00\",\"participants\":[]}"))
-                .andExpect(status().isBadRequest());
-        verifyNoInteractions(chatRoomCreateService);
+                .andExpect(status().isNotFound());
+        verifyNoInteractions(groupChatRoomJoinService);
     }
 
     @Test
