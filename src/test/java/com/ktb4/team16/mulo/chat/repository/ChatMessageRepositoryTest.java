@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import com.ktb4.team16.mulo.chat.entity.ChatMessage;
 import com.ktb4.team16.mulo.chat.entity.ChatRoom;
 import jakarta.persistence.EntityManager;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -30,7 +31,7 @@ class ChatMessageRepositoryTest {
     @Test
     void findsPersistedMessageByUserAndClientMessageId() {
         ChatRoom chatRoom = chatRoomRepository.saveAndFlush(
-                ChatRoom.create(920_001L, OffsetDateTime.parse("2026-10-15T00:00:00+09:00"))
+                ChatRoom.createGroup(LocalDate.of(2026, 10, 14), 920_001L, 1, OffsetDateTime.parse("2026-10-15T00:00:00+09:00"))
         );
         UUID clientMessageId = UUID.randomUUID();
         ChatMessage savedMessage = chatMessageRepository.saveAndFlush(
@@ -53,7 +54,7 @@ class ChatMessageRepositoryTest {
     @Test
     void databaseRejectsDuplicateUserAndClientMessageId() {
         ChatRoom chatRoom = chatRoomRepository.saveAndFlush(
-                ChatRoom.create(920_002L, OffsetDateTime.parse("2026-10-15T00:00:00+09:00"))
+                ChatRoom.createGroup(LocalDate.of(2026, 10, 14), 920_002L, 1, OffsetDateTime.parse("2026-10-15T00:00:00+09:00"))
         );
         String clientMessageId = UUID.randomUUID().toString();
         chatMessageRepository.saveAndFlush(

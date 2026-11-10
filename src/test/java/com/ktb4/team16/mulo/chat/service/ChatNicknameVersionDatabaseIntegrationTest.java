@@ -18,6 +18,7 @@ import com.ktb4.team16.mulo.chat.repository.ChatRoomParticipantRepository;
 import com.ktb4.team16.mulo.chat.repository.ChatRoomRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.validation.ConstraintViolationException;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
@@ -337,8 +338,8 @@ class ChatNicknameVersionDatabaseIntegrationTest {
 
     /** 유효한 채팅방과 입장한 참가자 한 명을 커밋한다. */
     private void createParticipant(String nickname) {
-        var room = rooms.saveAndFlush(ChatRoom.create(
-                IDS.incrementAndGet(), OffsetDateTime.now(ChatTime.KST).plusDays(1)));
+        var room = rooms.saveAndFlush(ChatRoom.createGroup(
+                LocalDate.of(2026, 10, 14), IDS.incrementAndGet(), 1, OffsetDateTime.now(ChatTime.KST).plusDays(1)));
         roomId = room.getChatRoomId();
         var participant = ChatRoomParticipant.create(room, userId, nickname);
         participant.enter();
