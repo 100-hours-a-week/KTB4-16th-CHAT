@@ -52,3 +52,18 @@ sentry:
   dsn: ${SENTRY_DSN:}
   send-default-pii: false
   max-request-body-size: none
+
+# 로컬 구형 전송은 기본값이며 ECS는 enabled=true를 필수로 검증한다.
+chat.delivery:
+  enabled: ${CHAT_DELIVERY_ENABLED:false}
+  redis:
+    host: ${CHAT_REDIS_HOST:127.0.0.1}
+    port: ${CHAT_REDIS_PORT:6379}
+    tls: ${CHAT_REDIS_TLS:false}
+    username: ${CHAT_REDIS_USERNAME:}
+    password: ${CHAT_REDIS_PASSWORD:}
+    environment: ${CHAT_DELIVERY_ENVIRONMENT:local}
+    connect-timeout: 1s
+    command-timeout: 500ms
+spring.lifecycle.timeout-per-shutdown-phase: 20s
+server.shutdown: graceful
