@@ -1,10 +1,7 @@
 package com.ktb4.team16.mulo.chat.controller;
 
-import com.ktb4.team16.mulo.chat.dto.request.CreateChatRoomRequest;
 import com.ktb4.team16.mulo.chat.dto.request.GroupChatJoinOrCreateRequest;
-import com.ktb4.team16.mulo.chat.dto.response.CreateChatRoomResponse;
 import com.ktb4.team16.mulo.chat.dto.response.GroupChatJoinOrCreateResponse;
-import com.ktb4.team16.mulo.chat.service.ChatRoomCreateService;
 import com.ktb4.team16.mulo.chat.service.GroupChatRoomJoinService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
@@ -18,22 +15,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/internal/chat-rooms")
 public class InternalChatRoomController {
 
-    private final ChatRoomCreateService chatRoomCreateService;
     private final GroupChatRoomJoinService groupChatRoomJoinService;
 
+    // 그룹 입장 처리를 담당하는 서비스를 주입한다.
     public InternalChatRoomController(
-            ChatRoomCreateService chatRoomCreateService,
             GroupChatRoomJoinService groupChatRoomJoinService
     ) {
-        this.chatRoomCreateService = chatRoomCreateService;
         this.groupChatRoomJoinService = groupChatRoomJoinService;
-    }
-
-    @PostMapping
-    public ResponseEntity<CreateChatRoomResponse> create(@Valid @RequestBody CreateChatRoomRequest request) {
-        ChatRoomCreateService.Result result = chatRoomCreateService.create(request);
-        return ResponseEntity.status(result.created() ? HttpStatus.CREATED : HttpStatus.OK)
-                .body(result.response());
     }
 
     @PostMapping("/group/join-or-create")

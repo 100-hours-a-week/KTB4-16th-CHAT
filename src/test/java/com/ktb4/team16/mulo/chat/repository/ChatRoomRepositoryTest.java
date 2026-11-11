@@ -7,6 +7,7 @@ import com.ktb4.team16.mulo.chat.entity.ChatMessage;
 import com.ktb4.team16.mulo.chat.entity.ChatRoom;
 import com.ktb4.team16.mulo.chat.entity.ChatRoomParticipant;
 import jakarta.persistence.EntityManager;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -34,30 +35,30 @@ class ChatRoomRepositoryTest {
     @Test
     void persistsAndReadsExpiresAtAsSeoulLocalTime() {
         OffsetDateTime backendExpiresAt = OffsetDateTime.parse("2026-10-14T00:00:00+09:00");
-        ChatRoom chatRoom = ChatRoom.create(205_001L, backendExpiresAt);
+        ChatRoom chatRoom = ChatRoom.createGroup(LocalDate.of(2026, 10, 14), 205_001L, 1, backendExpiresAt);
         LocalDateTime beforePersist = LocalDateTime.now(ChatTime.KST).minusSeconds(2);
 
         ChatRoom savedChatRoom = chatRoomRepository.saveAndFlush(chatRoom);
         LocalDateTime afterPersist = LocalDateTime.now(ChatTime.KST).plusSeconds(2);
         entityManager.clear();
 
-        ChatRoom loadedChatRoom = chatRoomRepository.findByMatchId(savedChatRoom.getMatchId()).orElseThrow();
+        ChatRoom loadedChatRoom = chatRoomRepository.findById(savedChatRoom.getChatRoomId()).orElseThrow();
 
         assertThat(loadedChatRoom.getExpiresAt()).isEqualTo(LocalDateTime.parse("2026-10-14T00:00:00"));
         assertThat(loadedChatRoom.getCreatedAt()).isBetween(beforePersist, afterPersist);
     }
 
     @Test
-    void persistsNewInternalRoomWithTwoUnenteredParticipants() {
-        ChatRoom room = chatRoomRepository.saveAndFlush(ChatRoom.create(
-                205_003L, OffsetDateTime.parse("2026-10-16T00:00:00+09:00")));
+    void persistsGroupRoomWithTwoUnenteredParticipants() {
+        ChatRoom room = chatRoomRepository.saveAndFlush(ChatRoom.createGroup(
+                LocalDate.of(2026, 10, 14), 205_003L, 1, OffsetDateTime.parse("2026-10-16T00:00:00+09:00")));
         participantRepository.saveAllAndFlush(List.of(
                 ChatRoomParticipant.create(room, 205_003L, "jettie"),
                 ChatRoomParticipant.create(room, 205_004L, "lulu")
         ));
         entityManager.clear();
 
-        ChatRoom loadedRoom = chatRoomRepository.findByMatchId(205_003L).orElseThrow();
+        ChatRoom loadedRoom = chatRoomRepository.findById(room.getChatRoomId()).orElseThrow();
         List<ChatRoomParticipant> participants =
                 participantRepository.findAllByChatRoomChatRoomId(loadedRoom.getChatRoomId());
 
@@ -71,8 +72,8 @@ class ChatRoomRepositoryTest {
 
     @Test
     void persistsParticipantAndMessageTimesInKst() {
-        ChatRoom room = chatRoomRepository.saveAndFlush(ChatRoom.create(
-                205_002L, OffsetDateTime.parse("2026-10-15T00:00:00+09:00")));
+        ChatRoom room = chatRoomRepository.saveAndFlush(ChatRoom.createGroup(
+                LocalDate.of(2026, 10, 14), 205_002L, 1, OffsetDateTime.parse("2026-10-15T00:00:00+09:00")));
         ChatRoomParticipant participant = ChatRoomParticipant.create(room, 205_002L, "jettie");
         LocalDateTime beforePersist = LocalDateTime.now(ChatTime.KST).minusSeconds(2);
         participant.enter();

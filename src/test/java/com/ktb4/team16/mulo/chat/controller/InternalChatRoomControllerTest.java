@@ -6,7 +6,6 @@ import static org.mockito.Mockito.when;
 
 import com.ktb4.team16.mulo.chat.dto.request.GroupChatJoinOrCreateRequest;
 import com.ktb4.team16.mulo.chat.dto.response.GroupChatJoinOrCreateResponse;
-import com.ktb4.team16.mulo.chat.service.ChatRoomCreateService;
 import com.ktb4.team16.mulo.chat.service.GroupChatRoomJoinService;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -19,9 +18,8 @@ class InternalChatRoomControllerTest {
     @Test
     @DisplayName("새 그룹 배정은 201과 배정 상태를 반환한다")
     void returnsCreatedForNewGroupAssignment() {
-        ChatRoomCreateService directService = mock(ChatRoomCreateService.class);
         GroupChatRoomJoinService groupService = mock(GroupChatRoomJoinService.class);
-        InternalChatRoomController controller = new InternalChatRoomController(directService, groupService);
+        InternalChatRoomController controller = new InternalChatRoomController(groupService);
         GroupChatJoinOrCreateRequest request = new GroupChatJoinOrCreateRequest(
                 java.time.LocalDate.of(2026, 10, 21), 88L, 17L, "nickname", "A");
         GroupChatJoinOrCreateResponse response = new GroupChatJoinOrCreateResponse(
@@ -37,9 +35,8 @@ class InternalChatRoomControllerTest {
     @Test
     @DisplayName("멱등한 그룹 배정 재요청은 200과 같은 방을 반환한다")
     void returnsOkForExistingGroupAssignment() {
-        ChatRoomCreateService directService = mock(ChatRoomCreateService.class);
         GroupChatRoomJoinService groupService = mock(GroupChatRoomJoinService.class);
-        InternalChatRoomController controller = new InternalChatRoomController(directService, groupService);
+        InternalChatRoomController controller = new InternalChatRoomController(groupService);
         GroupChatJoinOrCreateRequest request = new GroupChatJoinOrCreateRequest(
                 java.time.LocalDate.of(2026, 10, 21), 88L, 17L, "nickname", "A");
         GroupChatJoinOrCreateResponse response = new GroupChatJoinOrCreateResponse(

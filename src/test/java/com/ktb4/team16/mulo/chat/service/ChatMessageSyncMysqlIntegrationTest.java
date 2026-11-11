@@ -2,7 +2,9 @@ package com.ktb4.team16.mulo.chat.service;
 
 import static org.assertj.core.api.Assertions.*;
 
-import com.ktb4.team16.mulo.chat.dto.request.CreateChatRoomRequest;
+import com.ktb4.team16.mulo.chat.ChatTime;
+import com.ktb4.team16.mulo.chat.entity.ChatRoom;
+import com.ktb4.team16.mulo.chat.entity.ChatRoomParticipant;
 import com.ktb4.team16.mulo.chat.entity.ChatMessage;
 import com.ktb4.team16.mulo.chat.repository.*;
 
@@ -18,7 +20,7 @@ import java.util.concurrent.*;
 
 @SpringBootTest(properties = "chat.websocket.allowed-origins=http://localhost")
 class ChatMessageSyncMysqlIntegrationTest {
-    @Autowired ChatRoomCreateService create;
+    @Autowired ChatRoomParticipantRepository participants;
     @Autowired ChatRoomRestService rest;
     @Autowired ChatMessageSyncService sync;
     @Autowired ChatMessageRepository messages;
@@ -28,16 +30,7 @@ class ChatMessageSyncMysqlIntegrationTest {
 
     @Test
     void recovers45CommittedMessagesAndSerializesSameRoomIdAllocation() throws Exception {
-        long match = System.nanoTime();
-        var created =
-                create.create(
-                        new CreateChatRoomRequest(
-                                match,
-                                OffsetDateTime.now().plusDays(1),
-                                List.of(
-                                        new CreateChatRoomRequest.Participant(17L, "one"),
-                                        new CreateChatRoomRequest.Participant(18L, "two"))));
-        Long room = created.response().chatRoomId();
+        Long room = createGroupRoomWithParticipants();
         rest.enter(room, 17L);
         rest.enter(room, 18L);
         var tx = new TransactionTemplate(manager);
@@ -126,5 +119,18 @@ class ChatMessageSyncMysqlIntegrationTest {
         } finally {
             rooms.deleteById(room);
         }
+    }
+
+    /** 메시지 동기화 검증을 위해 GROUP 방과 두 참가자를 한 트랜잭션으로 커밋한다. */
+    private Long createGroupRoomWithParticipants() {
+        return new TransactionTemplate(manager).execute(status -> {
+            var date = ChatTime.now().toLocalDate();
+            var room = rooms.saveAndFlush(ChatRoom.createGroup(
+                    date, System.nanoTime(), 1, OffsetDateTime.now(ChatTime.KST).plusDays(1)));
+            participants.saveAllAndFlush(List.of(
+                    ChatRoomParticipant.createGroup(room, 17L, "one", date, "A"),
+                    ChatRoomParticipant.createGroup(room, 18L, "two", date, "B")));
+            return room.getChatRoomId();
+        });
     }
 }
