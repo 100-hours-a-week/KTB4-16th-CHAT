@@ -211,7 +211,7 @@ class GroupChatRoomJoinTransactionServiceTest {
     @DisplayName("오늘이 아닌 투표 날짜의 그룹 입장은 거부한다")
     void rejectsNonCurrentGroupDate() {
         GroupChatJoinOrCreateRequest request = new GroupChatJoinOrCreateRequest(
-                TODAY.minusDays(1), QUESTION_ID, USER_ID, "nickname", "A");
+                TODAY.minusDays(1), QUESTION_ID, USER_ID, "nickname", "A", null);
 
         assertThatThrownBy(() -> service.joinOrCreate(request))
                 .isInstanceOf(ChatApiException.class)
@@ -242,7 +242,7 @@ class GroupChatRoomJoinTransactionServiceTest {
     }
 
     private GroupChatJoinOrCreateRequest request(Long userId, Long questionId, String choice) {
-        return new GroupChatJoinOrCreateRequest(TODAY, questionId, userId, "nickname", choice);
+        return new GroupChatJoinOrCreateRequest(TODAY, questionId, userId, "nickname", choice, null);
     }
 
     private ChatRoom groupRoom(Long id, int sequence, int admittedCount) {
