@@ -21,7 +21,7 @@ class InternalChatRoomControllerTest {
         GroupChatRoomJoinService groupService = mock(GroupChatRoomJoinService.class);
         InternalChatRoomController controller = new InternalChatRoomController(groupService);
         GroupChatJoinOrCreateRequest request = new GroupChatJoinOrCreateRequest(
-                java.time.LocalDate.of(2026, 10, 21), 88L, 17L, "nickname", "A");
+                java.time.LocalDate.of(2026, 10, 21), 88L, 17L, "nickname", "A", null);
         GroupChatJoinOrCreateResponse response = new GroupChatJoinOrCreateResponse(
                 501L, 1, true, 1, 0, OffsetDateTime.of(2026, 10, 22, 0, 0, 0, 0, ZoneOffset.ofHours(9)));
         when(groupService.joinOrCreate(request)).thenReturn(new GroupChatRoomJoinService.Result(response, true));
@@ -38,7 +38,7 @@ class InternalChatRoomControllerTest {
         GroupChatRoomJoinService groupService = mock(GroupChatRoomJoinService.class);
         InternalChatRoomController controller = new InternalChatRoomController(groupService);
         GroupChatJoinOrCreateRequest request = new GroupChatJoinOrCreateRequest(
-                java.time.LocalDate.of(2026, 10, 21), 88L, 17L, "nickname", "A");
+                java.time.LocalDate.of(2026, 10, 21), 88L, 17L, "nickname", "A", null);
         GroupChatJoinOrCreateResponse response = new GroupChatJoinOrCreateResponse(
                 501L, 1, false, 1, 0, OffsetDateTime.of(2026, 10, 22, 0, 0, 0, 0, ZoneOffset.ofHours(9)));
         when(groupService.joinOrCreate(request)).thenReturn(new GroupChatRoomJoinService.Result(response, false));

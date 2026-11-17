@@ -165,7 +165,7 @@ class GroupChatRoomJoinConcurrencyIntegrationTest {
     void separatesGroupsByVoteQuestionId() {
         GroupChatRoomJoinService.Result first = joinService.joinOrCreate(request(13_000_001L));
         GroupChatJoinOrCreateRequest otherQuestionRequest = new GroupChatJoinOrCreateRequest(
-                groupDate, voteQuestionId + 1, 13_000_002L, "tester", "B");
+                groupDate, voteQuestionId + 1, 13_000_002L, "tester", "B", null);
 
         GroupChatRoomJoinService.Result second = joinService.joinOrCreate(otherQuestionRequest);
 
@@ -178,7 +178,7 @@ class GroupChatRoomJoinConcurrencyIntegrationTest {
     @DisplayName("오늘이 아닌 날짜는 그룹방을 만들지 않는다")
     void doesNotCreateGroupForDifferentDate() {
         GroupChatJoinOrCreateRequest otherDateRequest = new GroupChatJoinOrCreateRequest(
-                groupDate.plusDays(1), voteQuestionId, 13_000_003L, "tester", "A");
+                groupDate.plusDays(1), voteQuestionId, 13_000_003L, "tester", "A", null);
 
         assertThatThrownBy(() -> joinService.joinOrCreate(otherDateRequest))
                 .isInstanceOf(com.ktb4.team16.mulo.chat.exception.ChatApiException.class)
@@ -202,7 +202,7 @@ class GroupChatRoomJoinConcurrencyIntegrationTest {
     }
 
     private GroupChatJoinOrCreateRequest request(long userId) {
-        return new GroupChatJoinOrCreateRequest(groupDate, voteQuestionId, userId, "tester", "A");
+        return new GroupChatJoinOrCreateRequest(groupDate, voteQuestionId, userId, "tester", "A", null);
     }
 
     private int groupRoomCount(long questionId) {
