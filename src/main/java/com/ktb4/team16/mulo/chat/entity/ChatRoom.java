@@ -21,16 +21,12 @@ import java.util.Objects;
 ))
 public class ChatRoom {
 
-    public static final String DIRECT_ROOM_TYPE = "DIRECT";
     public static final String GROUP_ROOM_TYPE = "GROUP";
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "chat_room_id", nullable = false, updatable = false)
     private Long chatRoomId;
-
-    @Column(name = "match_id", unique = true)
-    private Long matchId;
 
     @Column(name = "room_type", nullable = false, length = 16)
     private String roomType;
@@ -57,20 +53,6 @@ public class ChatRoom {
     private LocalDateTime expiresAt;
 
     protected ChatRoom() {
-    }
-
-    private ChatRoom(Long matchId, OffsetDateTime expiresAt) {
-        this.matchId = matchId;
-        this.roomType = DIRECT_ROOM_TYPE;
-        this.capacity = 2;
-        this.admittedParticipantCount = 2;
-        this.expiresAt = Objects.requireNonNull(expiresAt)
-                .atZoneSameInstant(ChatTime.KST)
-                .toLocalDateTime();
-    }
-
-    public static ChatRoom create(Long matchId, OffsetDateTime expiresAt) {
-        return new ChatRoom(matchId, expiresAt);
     }
 
     private ChatRoom(LocalDate groupDate, Long voteQuestionId, int roomSequence, OffsetDateTime expiresAt) {
@@ -107,10 +89,6 @@ public class ChatRoom {
 
     public Long getChatRoomId() {
         return chatRoomId;
-    }
-
-    public Long getMatchId() {
-        return matchId;
     }
 
     public String getRoomType() { return roomType; }

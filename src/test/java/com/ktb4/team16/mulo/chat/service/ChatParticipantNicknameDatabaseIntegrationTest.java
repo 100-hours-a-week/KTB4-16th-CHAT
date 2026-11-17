@@ -235,18 +235,28 @@ class ChatParticipantNicknameDatabaseIntegrationTest {
                 });
     }
 
+    /** 기존 DIRECT 행의 닉네임·상세·이력 호환성을 검증할 SQL fixture를 만든다. */
     private ChatRoom createDirectRoom() {
-        ChatRoom room = roomRepository.saveAndFlush(ChatRoom.create(
-                nextId(), OffsetDateTime.now(ChatTime.KST).plusDays(1)));
-        createdRoomIds.add(room.getChatRoomId());
-        return room;
+        return seedLegacyDirectRoom(OffsetDateTime.now(ChatTime.KST).plusDays(1));
     }
 
+    /** 만료된 기존 DIRECT 행의 이벤트 제외 조건을 검증한다. */
     private ChatRoom createExpiredDirectRoom() {
-        ChatRoom room = roomRepository.saveAndFlush(ChatRoom.create(
-                nextId(), OffsetDateTime.now(ChatTime.KST).minusDays(1)));
-        createdRoomIds.add(room.getChatRoomId());
-        return room;
+        return seedLegacyDirectRoom(OffsetDateTime.now(ChatTime.KST).minusDays(1));
+    }
+
+    /** 새 생성 API 없이 V1–V6 스키마의 기존 DIRECT 행을 SQL로 재현한다. */
+    private ChatRoom seedLegacyDirectRoom(OffsetDateTime expiresAt) {
+        long legacyMatchId = nextId();
+        jdbcTemplate.update("""
+                INSERT INTO chat_rooms
+                    (match_id, room_type, capacity, admitted_participant_count, created_at, expires_at)
+                VALUES (?, 'DIRECT', 2, 2, ?, ?)
+                """, legacyMatchId, ChatTime.now(), expiresAt.atZoneSameInstant(ChatTime.KST).toLocalDateTime());
+        Long roomId = jdbcTemplate.queryForObject(
+                "SELECT chat_room_id FROM chat_rooms WHERE match_id = ?", Long.class, legacyMatchId);
+        createdRoomIds.add(roomId);
+        return roomRepository.findById(roomId).orElseThrow();
     }
 
     private ChatRoom createGroupRoom(long userId) {

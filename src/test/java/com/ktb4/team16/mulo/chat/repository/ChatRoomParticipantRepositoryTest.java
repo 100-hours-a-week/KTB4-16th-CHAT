@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ktb4.team16.mulo.chat.entity.ChatRoom;
 import com.ktb4.team16.mulo.chat.entity.ChatRoomParticipant;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
@@ -25,7 +26,7 @@ class ChatRoomParticipantRepositoryTest {
     @Test
     void findsOnlyParticipantsWhoJoinedAndHaveNotLeft() {
         ChatRoom chatRoom = chatRoomRepository.saveAndFlush(
-                ChatRoom.create(920_003L, OffsetDateTime.parse("2026-10-15T00:00:00+09:00"))
+                ChatRoom.createGroup(LocalDate.of(2026, 10, 14), 920_003L, 1, OffsetDateTime.parse("2026-10-15T00:00:00+09:00"))
         );
         ChatRoomParticipant active = ChatRoomParticipant.create(chatRoom, 17L, "jettie");
         active.enter();
@@ -45,7 +46,7 @@ class ChatRoomParticipantRepositoryTest {
     @DisplayName("참가자 ID 조회는 사용자 ID 오름차순으로 반환한다")
     void findsRoomParticipantIdsInUserIdOrder() {
         ChatRoom chatRoom = chatRoomRepository.saveAndFlush(
-                ChatRoom.create(920_004L, OffsetDateTime.parse("2026-10-15T00:00:00+09:00"))
+                ChatRoom.createGroup(LocalDate.of(2026, 10, 14), 920_004L, 1, OffsetDateTime.parse("2026-10-15T00:00:00+09:00"))
         );
         ChatRoomParticipant laterUser = ChatRoomParticipant.create(chatRoom, 28L, "lulu");
         laterUser.enter();

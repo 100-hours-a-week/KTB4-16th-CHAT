@@ -4,10 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.ktb4.team16.mulo.chat.ChatTime;
-import com.ktb4.team16.mulo.chat.dto.request.CreateChatRoomRequest;
 import com.ktb4.team16.mulo.chat.dto.request.GroupChatJoinOrCreateRequest;
-import com.ktb4.team16.mulo.chat.entity.ChatRoom;
-import java.time.OffsetDateTime;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
@@ -37,7 +34,6 @@ class GroupChatRoomJoinConcurrencyIntegrationTest {
     private static final AtomicLong QUESTION_SEQUENCE = new AtomicLong(System.currentTimeMillis());
     private final LocalDate groupDate = ChatTime.now().toLocalDate();
     private final long voteQuestionId = QUESTION_SEQUENCE.incrementAndGet();
-    private final long directMatchId = voteQuestionId + 50_000_000L;
 
     @Autowired
     private GroupChatRoomJoinService joinService;
@@ -50,12 +46,6 @@ class GroupChatRoomJoinConcurrencyIntegrationTest {
 
     @Autowired
     private ChatRoomRestService chatRoomRestService;
-
-    @Autowired
-    private ChatRoomCreateService chatRoomCreateService;
-
-    @Autowired
-    private com.ktb4.team16.mulo.chat.repository.ChatRoomRepository chatRoomRepository;
 
     @DynamicPropertySource
     static void testDatabase(DynamicPropertyRegistry registry) {
@@ -175,7 +165,7 @@ class GroupChatRoomJoinConcurrencyIntegrationTest {
     void separatesGroupsByVoteQuestionId() {
         GroupChatRoomJoinService.Result first = joinService.joinOrCreate(request(13_000_001L));
         GroupChatJoinOrCreateRequest otherQuestionRequest = new GroupChatJoinOrCreateRequest(
-                groupDate, voteQuestionId + 1, 13_000_002L, "tester", "B");
+                groupDate, voteQuestionId + 1, 13_000_002L, "tester", "B", null);
 
         GroupChatRoomJoinService.Result second = joinService.joinOrCreate(otherQuestionRequest);
 
@@ -188,7 +178,7 @@ class GroupChatRoomJoinConcurrencyIntegrationTest {
     @DisplayName("오늘이 아닌 날짜는 그룹방을 만들지 않는다")
     void doesNotCreateGroupForDifferentDate() {
         GroupChatJoinOrCreateRequest otherDateRequest = new GroupChatJoinOrCreateRequest(
-                groupDate.plusDays(1), voteQuestionId, 13_000_003L, "tester", "A");
+                groupDate.plusDays(1), voteQuestionId, 13_000_003L, "tester", "A", null);
 
         assertThatThrownBy(() -> joinService.joinOrCreate(otherDateRequest))
                 .isInstanceOf(com.ktb4.team16.mulo.chat.exception.ChatApiException.class)
@@ -196,26 +186,6 @@ class GroupChatRoomJoinConcurrencyIntegrationTest {
                         .getErrorCode())
                 .isEqualTo(com.ktb4.team16.mulo.chat.exception.ChatErrorCode.INVALID_INPUT_VALUE);
         assertThat(groupRoomCount(voteQuestionId)).isZero();
-    }
-
-    @Test
-    @DisplayName("V4 이후에도 기존 DIRECT 방 생성과 기본 정원을 유지한다")
-    void keepsDirectRoomDataCompatibleAfterMigration() {
-        OffsetDateTime expiresAt = groupDate.plusDays(1).atStartOfDay(ChatTime.KST).toOffsetDateTime();
-        CreateChatRoomRequest request = new CreateChatRoomRequest(directMatchId, expiresAt, List.of(
-                new CreateChatRoomRequest.Participant(14_000_001L, "directA"),
-                new CreateChatRoomRequest.Participant(14_000_002L, "directB")));
-
-        ChatRoomCreateService.Result result = chatRoomCreateService.create(request);
-        ChatRoom room = chatRoomRepository.findByMatchId(directMatchId).orElseThrow();
-
-        assertThat(result.response().chatRoomId()).isNotNull();
-        assertThat(room.getRoomType()).isEqualTo(ChatRoom.DIRECT_ROOM_TYPE);
-        assertThat(room.getCapacity()).isEqualTo(2);
-        assertThat(room.getAdmittedParticipantCount()).isEqualTo(2);
-        assertThat(jdbcTemplate.queryForObject("""
-                SELECT COUNT(*) FROM chat_room_participants WHERE chat_room_id = ?
-                """, Integer.class, room.getChatRoomId())).isEqualTo(2);
     }
 
     @AfterEach
@@ -229,16 +199,10 @@ class GroupChatRoomJoinConcurrencyIntegrationTest {
                 groupDate, voteQuestionId, voteQuestionId + 1);
         jdbcTemplate.update("DELETE FROM chat_room_group_allocators WHERE group_date = ? AND vote_question_id IN (?, ?)",
                 groupDate, voteQuestionId, voteQuestionId + 1);
-        jdbcTemplate.update("""
-                DELETE participant FROM chat_room_participants participant
-                JOIN chat_rooms room ON room.chat_room_id = participant.chat_room_id
-                WHERE room.match_id = ?
-                """, directMatchId);
-        jdbcTemplate.update("DELETE FROM chat_rooms WHERE match_id = ?", directMatchId);
     }
 
     private GroupChatJoinOrCreateRequest request(long userId) {
-        return new GroupChatJoinOrCreateRequest(groupDate, voteQuestionId, userId, "tester", "A");
+        return new GroupChatJoinOrCreateRequest(groupDate, voteQuestionId, userId, "tester", "A", null);
     }
 
     private int groupRoomCount(long questionId) {

@@ -7,10 +7,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ChatRoomRepository extends JpaRepository<ChatRoom, Long> {
 
-    Optional<ChatRoom> findByMatchId(Long matchId);
-
-    boolean existsByMatchId(Long matchId);
-
     Optional<ChatRoom> findFirstByRoomTypeAndGroupDateAndVoteQuestionIdOrderByRoomSequenceDesc(
             String roomType, LocalDate groupDate, Long voteQuestionId
     );

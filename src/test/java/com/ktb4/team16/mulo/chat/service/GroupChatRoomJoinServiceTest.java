@@ -25,7 +25,7 @@ class GroupChatRoomJoinServiceTest {
         GroupChatRoomJoinRetryService retryService = mock(GroupChatRoomJoinRetryService.class);
         GroupChatRoomJoinService service = new GroupChatRoomJoinService(transactionService, retryService);
         GroupChatJoinOrCreateRequest request = new GroupChatJoinOrCreateRequest(
-                LocalDate.of(2026, 10, 21), 88L, 17L, "nickname", "A");
+                LocalDate.of(2026, 10, 21), 88L, 17L, "nickname", "A", null);
         GroupChatRoomJoinService.Result retryResult = new GroupChatRoomJoinService.Result(
                 new GroupChatJoinOrCreateResponse(501L, 1, false, 1, 0,
                         OffsetDateTime.of(2026, 10, 22, 0, 0, 0, 0, ZoneOffset.ofHours(9))), false);
