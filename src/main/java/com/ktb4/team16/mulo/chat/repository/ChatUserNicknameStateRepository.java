@@ -10,6 +10,7 @@ import java.sql.SQLException;
 import java.sql.Savepoint;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.Optional;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -31,16 +32,42 @@ public class ChatUserNicknameStateRepository {
     @Transactional(propagation = Propagation.MANDATORY)
     public LockedNicknameState ensureAndLock(
             ChatNicknameVersionCommand command, LocalDateTime appliedAt) {
+        return ensureAndLock(command.userId(), command.nickname(), command.nicknameVersion(), appliedAt);
+    }
+
+    /** 버전 이벤트 ID 없이 방 요청의 첫 상태를 확보하고 사용자 행을 잠근다. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public LockedNicknameState ensureAndLock(
+            Long userId, String nickname, long nicknameVersion, LocalDateTime appliedAt) {
         boolean created = Boolean.TRUE.equals(jdbcTemplate.execute(
-                (ConnectionCallback<Boolean>) connection -> insertIfAbsent(connection, command, appliedAt)));
+                (ConnectionCallback<Boolean>) connection -> insertIfAbsent(
+                        connection, userId, nickname, nicknameVersion, appliedAt)));
         ChatUserNicknameState state = entityManager.find(
-                ChatUserNicknameState.class, command.userId(), LockModeType.PESSIMISTIC_WRITE);
+                ChatUserNicknameState.class, userId, LockModeType.PESSIMISTIC_WRITE);
         return new LockedNicknameState(state, created);
+    }
+
+    /** 요청 버전이 없는 경로에서 이미 존재하는 상태만 잠그고 읽는다. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public Optional<ChatUserNicknameState> findByUserIdForUpdate(Long userId) {
+        return Optional.ofNullable(entityManager.find(
+                ChatUserNicknameState.class, userId, LockModeType.PESSIMISTIC_WRITE));
+    }
+
+    /** 현재 트랜잭션이 임시로 만든 첫 상태를 제거한다. */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void deleteByUserId(Long userId) {
+        ChatUserNicknameState state = entityManager.find(
+                ChatUserNicknameState.class, userId, LockModeType.PESSIMISTIC_WRITE);
+        if (state != null) {
+            entityManager.remove(state);
+        }
     }
 
     /** 중복 PK만 저장 지점으로 되돌리고 다른 SQL 실패는 원래 트랜잭션에 전파한다. */
     private boolean insertIfAbsent(
-            Connection connection, ChatNicknameVersionCommand command, LocalDateTime appliedAt)
+            Connection connection, Long userId, String nickname,
+            long nicknameVersion, LocalDateTime appliedAt)
             throws SQLException {
         Savepoint savepoint = connection.setSavepoint();
         try (PreparedStatement statement = connection.prepareStatement("""
@@ -48,9 +75,9 @@ public class ChatUserNicknameStateRepository {
                     (user_id, nickname, nickname_version, updated_at)
                 VALUES (?, ?, ?, ?)
                 """)) {
-            statement.setLong(1, command.userId());
-            statement.setString(2, command.nickname());
-            statement.setLong(3, command.nicknameVersion());
+            statement.setLong(1, userId);
+            statement.setString(2, nickname);
+            statement.setLong(3, nicknameVersion);
             statement.setTimestamp(4, Timestamp.valueOf(appliedAt));
             statement.executeUpdate();
             connection.releaseSavepoint(savepoint);
