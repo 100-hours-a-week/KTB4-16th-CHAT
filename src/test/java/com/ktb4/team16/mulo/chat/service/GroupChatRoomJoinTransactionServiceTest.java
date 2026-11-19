@@ -40,14 +40,18 @@ class GroupChatRoomJoinTransactionServiceTest {
     private ChatRoomRepository roomRepository;
     private ChatRoomParticipantRepository participantRepository;
     private GroupChatRoomJoinTransactionService service;
+    private ChatNicknameStateResolver nicknameResolver;
 
     @BeforeEach
     void setUp() {
         allocatorRepository = mock(ChatRoomGroupAllocatorRepository.class);
         roomRepository = mock(ChatRoomRepository.class);
         participantRepository = mock(ChatRoomParticipantRepository.class);
+        nicknameResolver = mock(ChatNicknameStateResolver.class);
+        org.mockito.Mockito.lenient().when(nicknameResolver.resolveNickname(any(), any(), org.mockito.ArgumentMatchers.nullable(Long.class)))
+                .thenAnswer(invocation -> new ChatNicknameStateResolver.Resolution(invocation.getArgument(1), false));
         service = new GroupChatRoomJoinTransactionService(
-                allocatorRepository, roomRepository, participantRepository, CLOCK);
+                allocatorRepository, roomRepository, participantRepository, nicknameResolver, CLOCK);
         when(participantRepository.findByGroupDateAndUserIdForUpdate(TODAY, USER_ID))
                 .thenReturn(Optional.empty());
     }
@@ -139,6 +143,28 @@ class GroupChatRoomJoinTransactionServiceTest {
         assertThat(result.response().chatRoomId()).isEqualTo(504L);
         verify(allocator).advanceRoomSequence();
         verify(fullRoom, never()).admitParticipant();
+    }
+
+    /** 닉네임 상태를 참가자 조회보다 먼저 확보하고 기존 배정의 임시 상태를 정리한다. */
+    @Test
+    void resolvesNicknameBeforeExistingAssignmentAndDiscardsProvisionalState() {
+        var request = new GroupChatJoinOrCreateRequest(TODAY, QUESTION_ID, USER_ID, "봄바람", "A", 8L);
+        var resolution = new ChatNicknameStateResolver.Resolution("여름밤", true);
+        when(nicknameResolver.resolveNickname(USER_ID, "봄바람", 8L)).thenReturn(resolution);
+        var participant = mock(ChatRoomParticipant.class);
+        var room = groupRoom(505L, 1, 1);
+        when(participant.getChatRoom()).thenReturn(room);
+        when(participant.getVoteChoice()).thenReturn("A");
+        when(participantRepository.findByGroupDateAndUserIdForUpdate(TODAY, USER_ID))
+                .thenReturn(Optional.of(participant));
+        when(participantRepository.countByChatRoomChatRoomIdAndJoinedAtIsNotNullAndLeftAtIsNull(505L))
+                .thenReturn(0L);
+        assertThat(service.joinOrCreate(request).created()).isFalse();
+        var order = org.mockito.Mockito.inOrder(nicknameResolver, participantRepository);
+        order.verify(nicknameResolver).resolveNickname(USER_ID, "봄바람", 8L);
+        order.verify(participantRepository).findByGroupDateAndUserIdForUpdate(TODAY, USER_ID);
+        order.verify(nicknameResolver).discardUnusedFirstState(USER_ID, resolution);
+        verify(nicknameResolver, never()).reconcileExistingParticipants(any(), any());
     }
 
     @Test

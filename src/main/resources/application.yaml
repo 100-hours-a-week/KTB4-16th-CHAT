@@ -12,6 +12,8 @@ spring:
     enabled: true
 
 chat:
+  nickname-state:
+    enabled: ${CHAT_NICKNAME_STATE_ENABLED:false}
   websocket:
     allowed-origins: ${CHAT_WS_ALLOWED_ORIGINS:}
   auth:

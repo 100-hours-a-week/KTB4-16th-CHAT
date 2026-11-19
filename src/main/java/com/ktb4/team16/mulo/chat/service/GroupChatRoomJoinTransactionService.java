@@ -27,17 +27,21 @@ public class GroupChatRoomJoinTransactionService {
     private final ChatRoomGroupAllocatorRepository allocatorRepository;
     private final ChatRoomRepository roomRepository;
     private final ChatRoomParticipantRepository participantRepository;
+    private final ChatNicknameStateResolver nicknameResolver;
     private final Clock clock;
 
+    /** 그룹 배정 저장소와 사용자 닉네임 상태 결정을 연결한다. */
     public GroupChatRoomJoinTransactionService(
             ChatRoomGroupAllocatorRepository allocatorRepository,
             ChatRoomRepository roomRepository,
             ChatRoomParticipantRepository participantRepository,
+            ChatNicknameStateResolver nicknameResolver,
             Clock clock
     ) {
         this.allocatorRepository = allocatorRepository;
         this.roomRepository = roomRepository;
         this.participantRepository = participantRepository;
+        this.nicknameResolver = nicknameResolver;
         this.clock = clock;
     }
 
@@ -45,9 +49,14 @@ public class GroupChatRoomJoinTransactionService {
     @Transactional(isolation = Isolation.READ_COMMITTED)
     public GroupChatRoomJoinService.Result joinOrCreate(GroupChatJoinOrCreateRequest request) {
         validateGroupDate(request.groupDate());
+        // 중요: 닉네임 이벤트와 같은 사용자 상태를 참가자·그룹 배정보다 먼저 잠근다.
+        var nickname = nicknameResolver.resolveNickname(request.userId(), request.nickname(), request.nicknameVersion());
+        validateGroupDate(request.groupDate());
         var existing = participantRepository.findByGroupDateAndUserIdForUpdate(request.groupDate(), request.userId());
         if (existing.isPresent()) {
-            return resolveExisting(request, existing.get());
+            var result = resolveExisting(request, existing.get());
+            nicknameResolver.discardUnusedFirstState(request.userId(), nickname);
+            return result;
         }
 
         allocatorRepository.ensureGroupRow(request.groupDate(), request.voteQuestionId());
@@ -59,7 +68,9 @@ public class GroupChatRoomJoinTransactionService {
         // 같은 그룹 할당 행 잠금 대기 중 선행 요청이 커밋했을 수 있으므로 배정 전에 다시 확인한다.
         existing = participantRepository.findByGroupDateAndUserIdForUpdate(request.groupDate(), request.userId());
         if (existing.isPresent()) {
-            return resolveExisting(request, existing.get());
+            var result = resolveExisting(request, existing.get());
+            nicknameResolver.discardUnusedFirstState(request.userId(), nickname);
+            return result;
         }
 
         ChatRoom room = roomRepository
@@ -68,9 +79,11 @@ public class GroupChatRoomJoinTransactionService {
                 .filter(lastRoom -> lastRoom.getAdmittedParticipantCount() < GROUP_ROOM_CAPACITY)
                 .orElseGet(() -> createNextRoom(request, allocator));
 
+        // 새 배정이 확정된 경우에만 최초 상태와 기존 방의 이름을 함께 맞춘다.
+        nicknameResolver.reconcileExistingParticipants(request.userId(), nickname);
         room.admitParticipant();
         participantRepository.saveAndFlush(ChatRoomParticipant.createGroup(
-                room, request.userId(), request.nickname(), request.groupDate(), request.voteChoice()));
+                room, request.userId(), nickname.nickname(), request.groupDate(), request.voteChoice()));
         validateGroupDate(request.groupDate());
         return new GroupChatRoomJoinService.Result(response(room, true), true);
     }
