@@ -5015,6 +5015,118 @@ paths:
       - bearerAuth: []
       x-api-owner: Chat Server
       x-implementation-status: contract-only
+  "/internal/users/{userId}/nickname/versioned":
+    patch:
+      tags:
+      - CHAT INTERNAL / Chat Server 내부 연동
+      summary: 사용자 닉네임 버전 이벤트 반영
+      operationId: patchInternalUsersUserIdNicknameVersioned
+      description: |-
+        Backend가 닉네임 변경 Outbox 이벤트를 전달한다. Chat Server는 이벤트 ID와 닉네임 버전으로 중복·역순 이벤트를 구분해 상태와 기존 참가자 닉네임에 적용한다.
+
+        - APPLIED는 새 버전을 반영한 결과다.
+        - DUPLICATE는 현재 상태와 같은 버전·닉네임이 이미 적용된 결과다.
+        - STALE은 현재 상태보다 낮은 버전이라 무시한 결과다.
+      parameters:
+      - name: userId
+        in: path
+        required: true
+        description: 닉네임을 변경한 사용자 ID
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+              - nickname
+              - nicknameVersion
+              - eventId
+              properties:
+                nickname:
+                  type: string
+                  minLength: 1
+                  maxLength: 10
+                  description: 공백만으로 이루어지지 않은 새 닉네임
+                nicknameVersion:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                eventId:
+                  type: string
+                  format: uuid
+            example:
+              nickname: 새이름
+              nicknameVersion: 8
+              eventId: 2fca2a2a-0710-49b3-a5c0-31a8ca4f4437
+      responses:
+        '200':
+          description: 버전 이벤트를 반영했거나 중복·과거 이벤트로 판정했다.
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - status
+                - updatedParticipantCount
+                properties:
+                  status:
+                    type: string
+                    enum:
+                    - APPLIED
+                    - DUPLICATE
+                    - STALE
+                  updatedParticipantCount:
+                    type: integer
+                    minimum: 0
+              examples:
+                applied:
+                  value:
+                    status: APPLIED
+                    updatedParticipantCount: 2
+                duplicate:
+                  value:
+                    status: DUPLICATE
+                    updatedParticipantCount: 0
+                stale:
+                  value:
+                    status: STALE
+                    updatedParticipantCount: 0
+        '400':
+          description: 사용자 ID, 닉네임, 버전 또는 이벤트 ID 형식이 잘못됐다.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+              example:
+                code: INVALID_INPUT_VALUE
+                message: 입력값을 확인해주세요.
+        '401':
+          description: 내부 API Key가 없거나 유효하지 않다.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+              example:
+                code: UNAUTHORIZED
+                message: 내부 인증에 실패했습니다.
+        '500':
+          description: 동일 버전에 다른 닉네임이 전달되는 등 내부 처리 오류가 발생했다.
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/ErrorResponse"
+              example:
+                code: INTERNAL_SERVER_ERROR
+                message: 서버 내부 오류가 발생했습니다. 잠시 후 다시 시도해주세요.
+      security:
+      - internalApiKey: []
+      x-api-owner: Chat Server
+      x-implementation-status: implemented
   "/internal/chat-rooms":
     post:
       tags:
