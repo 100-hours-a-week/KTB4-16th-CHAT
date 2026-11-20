@@ -13,6 +13,7 @@ import com.ktb4.team16.mulo.chat.auth.security.WebSocketHandshakeRequestMatcher;
 import com.ktb4.team16.mulo.chat.auth.service.BackendTokenVerifier;
 import com.ktb4.team16.mulo.chat.controller.InternalUserController;
 import com.ktb4.team16.mulo.chat.dto.response.UpdateNicknameResponse;
+import com.ktb4.team16.mulo.chat.service.ChatNicknameVersionService;
 import com.ktb4.team16.mulo.chat.service.ChatParticipantNicknameService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,6 +40,9 @@ class InternalUserControllerSecurityTest {
 
     @MockitoBean
     private ChatParticipantNicknameService nicknameService;
+
+    @MockitoBean
+    private ChatNicknameVersionService nicknameVersionService;
 
     @Test
     void rejectsMissingOrIncorrectInternalApiKey() throws Exception {
