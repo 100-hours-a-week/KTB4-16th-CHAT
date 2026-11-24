@@ -20,7 +20,7 @@ on:
 env:
   SERVICE: chat
   KUBE_REPO: 100-hours-a-week/16-mulo-kube
-  VALUES_FILE: mulo/chat/chart/values.yaml
+  VALUES_FILE: chat/chart/values.yaml
 
 jobs:
   # ============================================================
